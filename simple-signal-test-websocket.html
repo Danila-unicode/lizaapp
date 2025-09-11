@@ -75,6 +75,7 @@
     </div>
 
     <script>
+        console.log('Script started');
         const SIGNALING_SERVER = 'https://lizamsg.ru:3000/api/signaling';
         
         // WebRTC конфигурация
@@ -132,40 +133,47 @@
             }
         };
         
-        // ===== USER 1 ФУНКЦИИ =====
+        // ===== УНИВЕРСАЛЬНЫЕ ФУНКЦИИ =====
+        console.log('Defining universal user functions');
         
-        async function startUser1() {
-            user1.id = document.getElementById('user1Id').value;
-            if (!user1.id) {
-                user1.log('❌ Введите ID пользователя 1', 'error');
+        // Универсальная функция для запуска пользователя
+        async function startUser(user, userId, videoElementId) {
+            user.id = document.getElementById(userId).value;
+            if (!user.id) {
+                user.log(`❌ Введите ID пользователя`, 'error');
                 return;
             }
             
-            user1.lastSignalId = Math.floor(Date.now() / 1000) - 60; // Получаем сигналы за последнюю минуту
-            user1.state = 'idle';
-            user1.targetUser = null;
-            user1.log(`🚀 Запуск User 1: ${user1.id}`, 'success');
-            user1.log(`⏰ Игнорируем сигналы старше: ${user1.lastSignalId}`, 'info');
-            user1.log(`📊 Состояние: ${user1.state}`, 'info');
+            user.lastSignalId = Math.floor(Date.now() / 1000) - 60; // Получаем сигналы за последнюю минуту
+            user.state = 'idle';
+            user.targetUser = null;
+            user.log(`🚀 Запуск ${user.id}`, 'success');
+            user.log(`⏰ Игнорируем сигналы старше: ${user.lastSignalId}`, 'info');
+            user.log(`📊 Состояние: ${user.state}`, 'info');
             
             try {
                 // Получаем медиа потоки
-                user1.localStream = await navigator.mediaDevices.getUserMedia({ 
+                user.localStream = await navigator.mediaDevices.getUserMedia({ 
                     video: true, 
                     audio: true 
                 });
                 
-                document.getElementById('localVideo1').srcObject = user1.localStream;
-                user1.log('✅ Медиа потоки получены', 'success');
+                document.getElementById(videoElementId).srcObject = user.localStream;
+                user.log('✅ Медиа потоки получены', 'success');
                 
                 // Запускаем polling для получения сигналов
-                if (user1.interval) clearInterval(user1.interval);
-                user1.interval = setInterval(() => checkSignals(user1), 1000); // Проверяем каждую секунду
-                checkSignals(user1);
+                if (user.interval) clearInterval(user.interval);
+                user.interval = setInterval(() => checkSignals(user), 1000); // Проверяем каждую секунду
+                checkSignals(user);
                 
             } catch (error) {
-                user1.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
+                user.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
             }
+        }
+        
+        // ===== USER 1 ФУНКЦИИ =====
+        async function startUser1() {
+            await startUser(user1, 'user1Id', 'localVideo1');
         }
         
         // Универсальная функция для отправки ping
@@ -179,6 +187,7 @@
             caller.targetUser = target.id;
             globalInitiator = caller.id; // caller становится глобальным инициатором
             caller.log(`📊 Состояние изменено на: ${caller.state}`, 'info');
+            caller.log(`🔍 Установлен globalInitiator: ${globalInitiator}`, 'info');
             caller.log(`📤 Отправка ping к ${target.id}`, 'warning');
             
             try {
@@ -198,6 +207,8 @@
                 
                 if (result.success) {
                     caller.log(`✅ Ping отправлен успешно`, 'success');
+                    // Немедленно проверяем сигналы для быстрого получения pong
+                    setTimeout(() => checkSignals(caller), 100);
                     // НЕ показываем кнопку offer здесь - она появится после получения pong
                 } else {
                     caller.log(`❌ Ошибка отправки ping: ${result.message}`, 'error');
@@ -305,81 +316,10 @@
         
         
         // ===== USER 2 ФУНКЦИИ =====
-        
         async function startUser2() {
-            user2.id = document.getElementById('user2Id').value;
-            if (!user2.id) {
-                user2.log('❌ Введите ID пользователя 2', 'error');
-                return;
-            }
-            
-            user2.lastSignalId = Math.floor(Date.now() / 1000) - 60; // Получаем сигналы за последнюю минуту
-            user2.state = 'idle';
-            user2.targetUser = null;
-            user2.log(`🚀 Запуск User 2: ${user2.id}`, 'success');
-            user2.log(`⏰ Игнорируем сигналы старше: ${user2.lastSignalId}`, 'info');
-            user2.log(`📊 Состояние: ${user2.state}`, 'info');
-            
-            try {
-                // Получаем медиа потоки
-                user2.localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
-                
-                document.getElementById('localVideo2').srcObject = user2.localStream;
-                user2.log('✅ Медиа потоки получены', 'success');
-                
-                // Запускаем polling для получения сигналов
-                if (user2.interval) clearInterval(user2.interval);
-                user2.interval = setInterval(() => checkSignals(user2), 1000); // Проверяем каждую секунду
-                checkSignals(user2);
-                
-            } catch (error) {
-                user2.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
-            }
+            await startUser(user2, 'user2Id', 'localVideo2');
         }
         
-        async function sendPing2() {
-            if (user2.state !== 'idle') {
-                user2.log(`⚠️ Нельзя отправить ping - состояние: ${user2.state}`, 'warning');
-                return;
-            }
-            
-            user2.state = 'connecting';
-            user2.targetUser = user1.id;
-            globalInitiator = 'user2'; // user2 становится глобальным инициатором
-            user2.log(`📊 Состояние изменено на: ${user2.state}`, 'info');
-            user2.log(`📤 Отправка ping к ${user1.id}`, 'warning');
-            
-            try {
-                const response = await fetch(SIGNALING_SERVER, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'ping',
-                        from: user2.id,
-                        to: user1.id,
-                        data: { timestamp: Date.now() }
-                    })
-                });
-                
-                const result = await response.json();
-                user2.log(`📡 Ответ сервера: ${JSON.stringify(result)}`, 'info');
-                
-                if (result.success) {
-                    user2.log(`✅ Ping отправлен успешно`, 'success');
-                    document.getElementById('answerBtn2').style.display = 'inline-block';
-                    document.getElementById('answerBtn2').disabled = false;
-                } else {
-                    user2.log(`❌ Ошибка отправки ping: ${result.message}`, 'error');
-                    user2.state = 'idle';
-                }
-            } catch (error) {
-                user2.log(`❌ Ошибка: ${error.message}`, 'error');
-                user2.state = 'idle';
-            }
-        }
         
         async function testAnswer2() {
             if (user2.state !== 'connecting') {
@@ -531,7 +471,7 @@
                     
                     user.log(`📨 Обрабатываем ${newSignals.length} новых сигналов`, 'success');
                     
-                    newSignals.forEach(signal => {
+                    for (const signal of newSignals) {
                         user.lastSignalId = Math.max(user.lastSignalId, signal.timestamp || signal.id);
                         user.log(`📨 ${signal.type} от ${signal.from}`, 'success');
                         
@@ -541,7 +481,18 @@
                                 user.state = 'connecting';
                                 user.targetUser = signal.from;
                                 user.log(`📊 Состояние изменено на: ${user.state}`, 'info');
-                                sendSignal(user, signal.from, 'pong', { received: true });
+                                
+                                // Отправляем pong и ждем завершения
+                                try {
+                                    await sendSignal(user, signal.from, 'pong', { received: true });
+                                    user.log(`✅ Pong отправлен успешно`, 'success');
+                                    
+                                    // Немедленно проверяем сигналы для быстрого получения ответа
+                                    setTimeout(() => checkSignals(user), 100);
+                                } catch (error) {
+                                    user.log(`❌ Ошибка отправки pong: ${error.message}`, 'error');
+                                }
+                                
                                 // Переходим в connected после отправки pong
                                 user.state = 'connected';
                                 user.log(`📊 Состояние изменено на: ${user.state}`, 'success');
@@ -591,7 +542,7 @@
                             handleDisconnect(user, signal);
                         }
                         // offer/answer/ice-candidate обрабатываются в checkWebRTCSignals
-                    });
+                    }
                     
                     // Удаляем обработанные сигналы с сервера
                     await deleteProcessedSignals(user);
@@ -833,6 +784,8 @@
         }
 
         function handleDisconnect(user, signal) {
+            user.log(`🔍 Отладка handleDisconnect: user.state=${user.state}, user.targetUser=${user.targetUser}, signal.from=${signal.from}`, 'info');
+            
             if ((user.state === 'connected' || user.state === 'calling') && user.targetUser === signal.from) {
                 user.log(`🔌 Получен сигнал разрыва соединения от ${signal.from}`, 'warning');
                 user.log(`📊 Причина: ${signal.data.reason || 'не указана'}`, 'info');
@@ -959,7 +912,7 @@
             
             user1.state = 'idle';
             user1.targetUser = null;
-            globalInitiator = null;
+            // globalInitiator НЕ сбрасываем здесь - это делается в disconnectCall
             
             document.getElementById('offerBtn1').style.display = 'none';
             document.getElementById('offerBtn1').disabled = true;
@@ -994,7 +947,7 @@
             
             user2.state = 'idle';
             user2.targetUser = null;
-            globalInitiator = null;
+            // globalInitiator НЕ сбрасываем здесь - это делается в disconnectCall
             
             document.getElementById('offerBtn2').style.display = 'none';
             document.getElementById('offerBtn2').disabled = true;
@@ -1015,6 +968,8 @@
             const initiator = globalInitiator === 'user1' ? user1 : user2;
             const receiver = globalInitiator === 'user1' ? user2 : user1;
             
+            initiator.log(`🔍 Отладка disconnect: globalInitiator=${globalInitiator}, initiator.id=${initiator.id}, initiator.targetUser=${initiator.targetUser}`, 'info');
+            
             try {
                 // Отправляем сигнал disconnect получателю
                 if (initiator.targetUser) {
@@ -1032,6 +987,8 @@
                     
                     const result = await response.json();
                     initiator.log(`📤 Сигнал disconnect отправлен: ${JSON.stringify(result)}`, 'info');
+                } else {
+                    initiator.log(`⚠️ Не могу отправить disconnect - initiator.targetUser пустой`, 'warning');
                 }
                 
                 // Очищаем сигналы на сервере для обоих пользователей
