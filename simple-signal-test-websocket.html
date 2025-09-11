@@ -31,7 +31,7 @@
             <button onclick="resetUser1()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
-            <button onclick="testOffer1()" id="offerBtn1" disabled style="background: #2196F3; color: white; display: none;">📤 Тест Offer</button>
+            <button onclick="testOffer1()" id="offerBtn1" disabled style="background: #2196F3; color: white; display: none;">📞 Начать звонок</button>
             <button onclick="startP2PCall()" id="p2pBtn1" disabled style="background: #9C27B0; color: white; display: none;">📞 Связь</button>
             <button onclick="disconnectCall()" id="disconnectBtn1" disabled style="background: #f44336; color: white; display: none;">🔌 Разорвать соединение</button>
         </div>
@@ -568,7 +568,7 @@
                 // Показываем кнопки только глобальному инициатору
                 if (globalInitiator === 'user1') {
                     if (user.state === 'connected') {
-                        // После ping-pong показываем кнопку "Тест Offer"
+                        // После ping-pong показываем кнопку "Начать звонок"
                         offerBtn.style.display = 'inline-block';
                         offerBtn.disabled = false;
                         p2pBtn.style.display = 'none';
@@ -605,7 +605,7 @@
                 // Показываем кнопки только глобальному инициатору
                 if (globalInitiator === 'user2') {
                     if (user.state === 'connected') {
-                        // После ping-pong показываем кнопку "Тест Offer"
+                        // После ping-pong показываем кнопку "Начать звонок"
                         offerBtn.style.display = 'inline-block';
                         offerBtn.disabled = false;
                         p2pBtn.style.display = 'none';
