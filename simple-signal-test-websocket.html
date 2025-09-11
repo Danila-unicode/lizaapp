@@ -55,6 +55,7 @@
         <div style="margin: 10px 0;">
             <button onclick="testOffer2()" id="offerBtn2" disabled style="background: #2196F3; color: white; display: none;">📤 Начать звонок</button>
             <button onclick="startP2PCall()" id="p2pBtn2" disabled style="background: #9C27B0; color: white; display: none;">📞 Связь</button>
+            <button onclick="disconnectCall()" id="disconnectBtn2" disabled style="background: #f44336; color: white; display: none;">🔌 Разорвать соединение</button>
             <button onclick="testAnswer2()" id="answerBtn2" disabled style="background: #4CAF50; color: white; display: none;">📥 Тест Answer (ручной)</button>
             <div id="autoAnswerInfo" style="display: none; color: #4CAF50; font-weight: bold;">🤖 Answer отправляется автоматически при получении offer</div>
         </div>
@@ -281,6 +282,20 @@
                     document.getElementById(videoId).srcObject = event.streams[0];
                 };
                 
+                caller.peerConnection.onconnectionstatechange = () => {
+                    caller.log(`🔗 Состояние соединения: ${caller.peerConnection.connectionState}`, 'info');
+                    if (caller.peerConnection.connectionState === 'connected') {
+                        caller.log('✅ P2P соединение установлено!', 'success');
+                    } else if (caller.peerConnection.connectionState === 'failed') {
+                        caller.log('❌ P2P соединение не удалось', 'error');
+                    } else if (caller.peerConnection.connectionState === 'disconnected') {
+                        caller.log('🔌 P2P соединение разорвано - сбрасываем в исходное состояние', 'warning');
+                        // Автоматически сбрасываем пользователя при разрыве соединения
+                        resetUser1();
+                        resetUser2();
+                    }
+                };
+                
                 // Создаем offer
                 const offer = await caller.peerConnection.createOffer();
                 await caller.peerConnection.setLocalDescription(offer);
@@ -401,9 +416,6 @@
                                 handleAnswer(user, signal);
                             } else if (signal.type === 'ice-candidate') {
                                 handleIceCandidate(user, signal);
-                            } else if (signal.type === 'disconnect') {
-                                user.log(`📥 Получен disconnect от ${signal.from}`, 'warning');
-                                handleDisconnect(user, signal);
                             }
                         });
                         
@@ -498,16 +510,9 @@
                                 user.log(`📊 Состояние изменено на: ${user.state}`, 'success');
                                 user.log(`🔗 P2P соединение готово для WebRTC!`, 'success');
                                 
-                                // Останавливаем polling после установки связи
-                                if (user.interval) {
-                                    clearInterval(user.interval);
-                                    user.interval = null;
-                                    user.log(`⏹️ Polling остановлен - связь установлена`, 'info');
-                                }
-                                
-                                // Запускаем polling для WebRTC сигналов (offer)
-                                user.interval = setInterval(() => checkWebRTCSignals(user), 1000);
-                                user.log(`🔄 Запущен polling для WebRTC сигналов (offer)`, 'info');
+                                // Продолжаем использовать checkSignals для получения disconnect сигналов
+                                // user.interval уже работает с checkSignals
+                                user.log(`🔄 Продолжаем polling для получения disconnect сигналов`, 'info');
                                 
                                 updateAllCallButtons();
                             } else {
@@ -521,16 +526,9 @@
                                 user.log(`🔗 P2P соединение готово для WebRTC!`, 'success');
                                 user.log(`💡 Теперь можно нажать "Начать звонок" для WebRTC`, 'info');
                                 
-                                // Останавливаем polling после установки связи
-                                if (user.interval) {
-                                    clearInterval(user.interval);
-                                    user.interval = null;
-                                    user.log(`⏹️ Polling остановлен - связь установлена`, 'info');
-                                }
-                                
-                                // Запускаем polling для WebRTC сигналов (offer)
-                                user.interval = setInterval(() => checkWebRTCSignals(user), 1000);
-                                user.log(`🔄 Запущен polling для WebRTC сигналов (offer)`, 'info');
+                                // Продолжаем использовать checkSignals для получения disconnect сигналов
+                                // user.interval уже работает с checkSignals
+                                user.log(`🔄 Продолжаем polling для получения disconnect сигналов`, 'info');
                                 
                                 updateAllCallButtons();
                             } else if (user.state === 'connected' && user.targetUser === signal.from) {
@@ -538,10 +536,15 @@
                             } else {
                                 user.log(`⚠️ Игнорируем pong от ${signal.from} - состояние: ${user.state}, ожидали: ${user.targetUser}`, 'warning');
                             }
-                        } else if (signal.type === 'disconnect') {
-                            handleDisconnect(user, signal);
+                        } else if (signal.type === 'offer') {
+                            user.log(`📥 Получен offer от ${signal.from}`, 'warning');
+                            handleOffer(user, signal);
+                        } else if (signal.type === 'answer') {
+                            user.log(`📥 Получен answer от ${signal.from}`, 'warning');
+                            handleAnswer(user, signal);
+                        } else if (signal.type === 'ice-candidate') {
+                            handleIceCandidate(user, signal);
                         }
-                        // offer/answer/ice-candidate обрабатываются в checkWebRTCSignals
                     }
                     
                     // Удаляем обработанные сигналы с сервера
@@ -583,14 +586,20 @@
                         disconnectBtn.style.display = 'none';
                     }
                 } else {
-                    // Не инициатор - скрываем все кнопки
+                    // Не инициатор - показываем только кнопку disconnect в состоянии calling
                     offerBtn.style.display = 'none';
                     p2pBtn.style.display = 'none';
-                    disconnectBtn.style.display = 'none';
+                    if (user.state === 'calling') {
+                        disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.disabled = false;
+                    } else {
+                        disconnectBtn.style.display = 'none';
+                    }
                 }
             } else if (user.id === 'user2') {
                 const offerBtn = document.getElementById('offerBtn2');
                 const p2pBtn = document.getElementById('p2pBtn2');
+                const disconnectBtn = document.getElementById('disconnectBtn2');
                 const autoAnswerInfo = document.getElementById('autoAnswerInfo');
                 
                 // Показываем кнопки только глобальному инициатору
@@ -600,26 +609,37 @@
                         offerBtn.style.display = 'inline-block';
                         offerBtn.disabled = false;
                         p2pBtn.style.display = 'none';
+                        disconnectBtn.style.display = 'none';
                         autoAnswerInfo.style.display = 'none';
                     } else if (user.state === 'calling') {
                         // После успешного offer/answer показываем кнопку "Начать звонок"
                         offerBtn.style.display = 'none';
                         p2pBtn.style.display = 'inline-block';
                         p2pBtn.disabled = false;
+                        disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.disabled = false;
                         autoAnswerInfo.style.display = 'none';
                     } else {
                         offerBtn.style.display = 'none';
                         p2pBtn.style.display = 'none';
+                        disconnectBtn.style.display = 'none';
                         autoAnswerInfo.style.display = 'none';
                     }
                 } else {
-                    // Не инициатор - скрываем все кнопки, но показываем авто-answer info
+                    // Не инициатор - показываем только кнопку disconnect в состоянии calling
                     offerBtn.style.display = 'none';
                     p2pBtn.style.display = 'none';
-                    if (user.state === 'connected') {
-                        autoAnswerInfo.style.display = 'block';
-                    } else {
+                    if (user.state === 'calling') {
+                        disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.disabled = false;
                         autoAnswerInfo.style.display = 'none';
+                    } else {
+                        disconnectBtn.style.display = 'none';
+                        if (user.state === 'connected') {
+                            autoAnswerInfo.style.display = 'block';
+                        } else {
+                            autoAnswerInfo.style.display = 'none';
+                        }
                     }
                 }
             }
@@ -664,6 +684,11 @@
                     user.log('✅ P2P соединение установлено!', 'success');
                 } else if (user.peerConnection.connectionState === 'failed') {
                     user.log('❌ P2P соединение не удалось', 'error');
+                } else if (user.peerConnection.connectionState === 'disconnected') {
+                    user.log('🔌 P2P соединение разорвано - сбрасываем в исходное состояние', 'warning');
+                    // Автоматически сбрасываем пользователя при разрыве соединения
+                    resetUser1();
+                    resetUser2();
                 }
             };
         }
@@ -753,12 +778,16 @@
                 await user.peerConnection.setRemoteDescription(signal.data);
                 user.log(`✅ Offer/Answer обмен завершен!`, 'success');
                 
-                // Останавливаем polling после получения answer
+                // Переключаем polling на проверку disconnect сигналов
                 if (user.interval) {
                     clearInterval(user.interval);
                     user.interval = null;
                     user.log(`⏹️ Polling остановлен - WebRTC соединение установлено`, 'info');
                 }
+                
+                // Запускаем polling для проверки disconnect сигналов
+                user.interval = setInterval(() => checkSignals(user), 1000);
+                user.log(`🔄 Запущен polling для disconnect сигналов`, 'info');
                 
                 // Обновляем кнопки после завершения offer/answer обмена
                 updateAllCallButtons();
@@ -785,6 +814,7 @@
 
         function handleDisconnect(user, signal) {
             user.log(`🔍 Отладка handleDisconnect: user.state=${user.state}, user.targetUser=${user.targetUser}, signal.from=${signal.from}`, 'info');
+            user.log(`📥 Получен disconnect сигнал от ${signal.from}`, 'warning');
             
             if ((user.state === 'connected' || user.state === 'calling') && user.targetUser === signal.from) {
                 user.log(`🔌 Получен сигнал разрыва соединения от ${signal.from}`, 'warning');
@@ -964,36 +994,34 @@
         }
         
         async function disconnectCall() {
-            // Определяем инициатора и получателя
-            const initiator = globalInitiator === 'user1' ? user1 : user2;
-            const receiver = globalInitiator === 'user1' ? user2 : user1;
+            // Определяем кто нажал кнопку disconnect
+            let caller = null;
             
-            initiator.log(`🔍 Отладка disconnect: globalInitiator=${globalInitiator}, initiator.id=${initiator.id}, initiator.targetUser=${initiator.targetUser}`, 'info');
+            // Проверяем состояние обоих пользователей
+            if (user1.state === 'calling' && user1.targetUser) {
+                caller = user1;
+            } else if (user2.state === 'calling' && user2.targetUser) {
+                caller = user2;
+            }
+            
+            if (!caller) {
+                user1.log(`⚠️ Не могу разорвать соединение - нет активного соединения`, 'warning');
+                return;
+            }
+            
+            caller.log(`🔌 Разрываем P2P соединение (${caller.id})`, 'warning');
+            
+            // Закрываем PeerConnection - это автоматически разорвет соединение у обоих пользователей
+            if (caller.peerConnection) {
+                caller.peerConnection.close();
+                caller.peerConnection = null;
+                caller.log(`🔌 PeerConnection закрыт`, 'info');
+            }
+            
+            // Очищаем сигналы на сервере для обоих пользователей
+            user1.log('🧹 Очистка сигналов на сервере...', 'info');
             
             try {
-                // Отправляем сигнал disconnect получателю
-                if (initiator.targetUser) {
-                    const response = await fetch(SIGNALING_SERVER, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            action: 'signal',
-                            from: initiator.id,
-                            to: initiator.targetUser,
-                            type: 'disconnect',
-                            data: { reason: 'Пользователь разорвал соединение' }
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    initiator.log(`📤 Сигнал disconnect отправлен: ${JSON.stringify(result)}`, 'info');
-                } else {
-                    initiator.log(`⚠️ Не могу отправить disconnect - initiator.targetUser пустой`, 'warning');
-                }
-                
-                // Очищаем сигналы на сервере для обоих пользователей
-                user1.log('🧹 Очистка сигналов на сервере...', 'info');
-                
                 // Очищаем сигналы для user1
                 const response1 = await fetch(`${SIGNALING_SERVER}?action=delete&userId=user1`);
                 const result1 = await response1.json();
@@ -1011,7 +1039,7 @@
                 user2.log(`❌ Ошибка очистки сигналов: ${error.message}`, 'error');
             }
             
-            // Сбрасываем состояние пользователей
+            // Сбрасываем состояние обоих пользователей
             resetUser1();
             resetUser2();
         }
