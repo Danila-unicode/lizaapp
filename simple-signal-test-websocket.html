@@ -25,8 +25,9 @@
         <div class="user-section">
             <h2>User 1</h2>
             <input type="text" id="user1Id" value="user1" placeholder="User ID">
+            <input type="text" id="user1Target" value="user2" placeholder="Целевой пользователь">
             <button onclick="startUser1()">Запустить User 1</button>
-            <button onclick="sendPing1()">Отправить ping к user2</button>
+            <button onclick="sendPingToTarget('user1')">Отправить ping к целевому пользователю</button>
             <button onclick="resetUser1()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
@@ -46,8 +47,9 @@
         <div class="user-section">
             <h2>User 2</h2>
             <input type="text" id="user2Id" value="user2" placeholder="User ID">
+            <input type="text" id="user2Target" value="user1" placeholder="Целевой пользователь">
             <button onclick="startUser2()">Запустить User 2</button>
-            <button onclick="sendPing2()">Отправить ping к user1</button>
+            <button onclick="sendPingToTarget('user2')">Отправить ping к целевому пользователю</button>
             <button onclick="resetUser2()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
@@ -166,17 +168,18 @@
             }
         }
         
-        async function sendPing1() {
-            if (user1.state !== 'idle') {
-                user1.log(`⚠️ Нельзя отправить ping - состояние: ${user1.state}`, 'warning');
+        // Универсальная функция для отправки ping
+        async function sendPing(caller, target) {
+            if (caller.state !== 'idle') {
+                caller.log(`⚠️ Нельзя отправить ping - состояние: ${caller.state}`, 'warning');
                 return;
             }
             
-            user1.state = 'connecting';
-            user1.targetUser = user2.id;
-            globalInitiator = 'user1'; // user1 становится глобальным инициатором
-            user1.log(`📊 Состояние изменено на: ${user1.state}`, 'info');
-            user1.log(`📤 Отправка ping к ${user2.id}`, 'warning');
+            caller.state = 'connecting';
+            caller.targetUser = target.id;
+            globalInitiator = caller.id; // caller становится глобальным инициатором
+            caller.log(`📊 Состояние изменено на: ${caller.state}`, 'info');
+            caller.log(`📤 Отправка ping к ${target.id}`, 'warning');
             
             try {
                 const response = await fetch(SIGNALING_SERVER, {
@@ -184,135 +187,122 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         action: 'ping',
-                        from: user1.id,
-                        to: user2.id,
+                        from: caller.id,
+                        to: target.id,
                         data: { timestamp: Date.now() }
                     })
                 });
                 
                 const result = await response.json();
-                user1.log(`📡 Ответ сервера: ${JSON.stringify(result)}`, 'info');
+                caller.log(`📡 Ответ сервера: ${JSON.stringify(result)}`, 'info');
                 
                 if (result.success) {
-                    user1.log(`✅ Ping отправлен успешно`, 'success');
+                    caller.log(`✅ Ping отправлен успешно`, 'success');
                     // НЕ показываем кнопку offer здесь - она появится после получения pong
                 } else {
-                    user1.log(`❌ Ошибка отправки ping: ${result.message}`, 'error');
-                    user1.state = 'idle';
+                    caller.log(`❌ Ошибка отправки ping: ${result.message}`, 'error');
+                    caller.state = 'idle';
+                    caller.targetUser = null;
+                    globalInitiator = null;
                 }
             } catch (error) {
-                user1.log(`❌ Ошибка: ${error.message}`, 'error');
-                user1.state = 'idle';
+                caller.log(`❌ Ошибка: ${error.message}`, 'error');
+                caller.state = 'idle';
+                caller.targetUser = null;
+                globalInitiator = null;
             }
         }
         
-        async function testOffer1() {
-            if (user1.state !== 'connected') {
-                user1.log(`⚠️ Нельзя отправить offer - состояние: ${user1.state}`, 'warning');
+        // Универсальная функция для отправки ping к целевому пользователю
+        async function sendPingToTarget(userId) {
+            const user = userId === 'user1' ? user1 : user2;
+            const targetId = document.getElementById(`${userId}Target`).value;
+            
+            if (!targetId) {
+                user.log('❌ Не указан целевой пользователь', 'error');
                 return;
             }
             
-            user1.log('🔧 Создание Peer Connection...', 'info');
+            // Создаем объект целевого пользователя
+            const target = { id: targetId };
+            
+            await sendPing(user, target);
+        }
+        
+        // Функции для конкретных пользователей (для совместимости с кнопками)
+        async function sendPing1() {
+            await sendPing(user1, user2);
+        }
+        
+        async function sendPing2() {
+            await sendPing(user2, user1);
+        }
+        
+        // Универсальная функция для создания WebRTC соединения
+        async function startWebRTCCall(caller, target) {
+            if (caller.state !== 'connected') {
+                caller.log(`⚠️ Нельзя отправить offer - состояние: ${caller.state}`, 'warning');
+                return;
+            }
+            
+            caller.log('🔧 Создание Peer Connection...', 'info');
             
             try {
                 // Создаем Peer Connection
-                user1.peerConnection = new RTCPeerConnection(rtcConfig);
+                caller.peerConnection = new RTCPeerConnection(rtcConfig);
                 
                 // Добавляем локальный поток
-                user1.localStream.getTracks().forEach(track => {
-                    user1.peerConnection.addTrack(track, user1.localStream);
+                caller.localStream.getTracks().forEach(track => {
+                    caller.peerConnection.addTrack(track, caller.localStream);
                 });
                 
                 // Обработчики событий
-                user1.peerConnection.onicecandidate = (event) => {
+                caller.peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
-                        user1.log('🧊 ICE кандидат найден', 'info');
-                        sendSignal(user1, user2.id, 'ice-candidate', event.candidate);
+                        caller.log('🧊 ICE кандидат найден', 'info');
+                        sendSignal(caller, target.id, 'ice-candidate', event.candidate);
                     }
                 };
                 
-                user1.peerConnection.ontrack = (event) => {
-                    user1.log('📹 Получен удаленный поток', 'success');
-                    document.getElementById('remoteVideo1').srcObject = event.streams[0];
+                caller.peerConnection.ontrack = (event) => {
+                    caller.log('📹 Получен удаленный поток', 'success');
+                    const videoId = caller.id === 'user1' ? 'remoteVideo1' : 'remoteVideo2';
+                    document.getElementById(videoId).srcObject = event.streams[0];
                 };
                 
                 // Создаем offer
-                const offer = await user1.peerConnection.createOffer();
-                await user1.peerConnection.setLocalDescription(offer);
+                const offer = await caller.peerConnection.createOffer();
+                await caller.peerConnection.setLocalDescription(offer);
                 
-                user1.log('📤 Offer создан, отправка...', 'info');
+                caller.log('📤 Offer создан, отправка...', 'info');
                 
                 // Отправляем offer
-                await sendSignal(user1, user2.id, 'offer', offer);
+                await sendSignal(caller, target.id, 'offer', offer);
                 
-                user1.state = 'calling';
-                user1.log(`📊 Состояние изменено на: ${user1.state}`, 'info');
+                caller.state = 'calling';
+                caller.log(`📊 Состояние изменено на: ${caller.state}`, 'info');
                 updateAllCallButtons();
-                user1.log('✅ Offer отправлен, ожидание answer', 'success');
+                caller.log('✅ Offer отправлен, ожидание answer', 'success');
                 
                 // Запускаем polling для WebRTC сигналов (answer)
-                user1.interval = setInterval(() => checkWebRTCSignals(user1), 1000);
-                user1.log(`🔄 Запущен polling для WebRTC сигналов (answer)`, 'info');
+                caller.interval = setInterval(() => checkWebRTCSignals(caller), 1000);
+                caller.log(`🔄 Запущен polling для WebRTC сигналов (answer)`, 'info');
                 
             } catch (error) {
-                user1.log(`❌ Ошибка создания offer: ${error.message}`, 'error');
-                user1.state = 'idle';
+                caller.log(`❌ Ошибка создания offer: ${error.message}`, 'error');
+                caller.state = 'idle';
             }
+        }
+        
+        // Функции для конкретных пользователей (для совместимости с кнопками)
+        async function testOffer1() {
+            await startWebRTCCall(user1, user2);
         }
         
         async function testOffer2() {
-            if (user2.state !== 'connected') {
-                user2.log(`⚠️ Нельзя отправить offer - состояние: ${user2.state}`, 'warning');
-                return;
-            }
-            
-            user2.log('🔧 Создание Peer Connection...', 'info');
-            
-            try {
-                // Создаем Peer Connection
-                user2.peerConnection = new RTCPeerConnection(rtcConfig);
-                
-                // Добавляем локальный поток
-                user2.localStream.getTracks().forEach(track => {
-                    user2.peerConnection.addTrack(track, user2.localStream);
-                });
-                
-                // Обработчики событий
-                user2.peerConnection.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        user2.log('🧊 ICE кандидат найден', 'info');
-                        sendSignal(user2, user1.id, 'ice-candidate', event.candidate);
-                    }
-                };
-                
-                user2.peerConnection.ontrack = (event) => {
-                    user2.log('📹 Получен удаленный поток', 'success');
-                    document.getElementById('remoteVideo2').srcObject = event.streams[0];
-                };
-                
-                // Создаем offer
-                const offer = await user2.peerConnection.createOffer();
-                await user2.peerConnection.setLocalDescription(offer);
-                
-                user2.log('📤 Offer создан, отправка...', 'info');
-                
-                // Отправляем offer
-                await sendSignal(user2, user1.id, 'offer', offer);
-                
-                user2.state = 'calling';
-                user2.log(`📊 Состояние изменено на: ${user2.state}`, 'info');
-                updateAllCallButtons();
-                user2.log('✅ Offer отправлен, ожидание answer', 'success');
-                
-                // Запускаем polling для WebRTC сигналов (answer)
-                user2.interval = setInterval(() => checkWebRTCSignals(user2), 1000);
-                user2.log(`🔄 Запущен polling для WebRTC сигналов (answer)`, 'info');
-                
-            } catch (error) {
-                user2.log(`❌ Ошибка создания offer: ${error.message}`, 'error');
-                user2.state = 'idle';
-            }
+            await startWebRTCCall(user2, user1);
         }
+        
         
         // ===== USER 2 ФУНКЦИИ =====
         
@@ -471,6 +461,9 @@
                                 handleAnswer(user, signal);
                             } else if (signal.type === 'ice-candidate') {
                                 handleIceCandidate(user, signal);
+                            } else if (signal.type === 'disconnect') {
+                                user.log(`📥 Получен disconnect от ${signal.from}`, 'warning');
+                                handleDisconnect(user, signal);
                             }
                         });
                         
@@ -747,13 +740,20 @@
                         video: true,
                         audio: true
                     });
-                    user.localStream.getTracks().forEach(track => {
-                        user.peerConnection.addTrack(track, user.localStream);
-                    });
                     
                     // Показываем локальное видео
                     const localVideo = document.getElementById(`localVideo${user.id === 'user1' ? '1' : '2'}`);
                     localVideo.srcObject = user.localStream;
+                    
+                    user.log('📹 Локальный поток получен и отображен', 'success');
+                }
+                
+                // Добавляем локальные треки к PeerConnection
+                if (user.localStream) {
+                    user.localStream.getTracks().forEach(track => {
+                        user.peerConnection.addTrack(track, user.localStream);
+                    });
+                    user.log('📤 Локальные треки добавлены к PeerConnection', 'info');
                 }
                 
                 // Устанавливаем удаленное описание
@@ -860,6 +860,7 @@
                 // Сбрасываем состояние пользователя
                 user.state = 'idle';
                 user.targetUser = null;
+                globalInitiator = null; // Сбрасываем глобального инициатора
                 user.log(`📊 Состояние изменено на: ${user.state}`, 'info');
                 user.log(`🔄 Соединение разорвано, возврат в исходное состояние`, 'success');
                 
@@ -1010,8 +1011,30 @@
         }
         
         async function disconnectCall() {
-            // Очищаем сигналы на сервере для обоих пользователей
+            // Определяем инициатора и получателя
+            const initiator = globalInitiator === 'user1' ? user1 : user2;
+            const receiver = globalInitiator === 'user1' ? user2 : user1;
+            
             try {
+                // Отправляем сигнал disconnect получателю
+                if (initiator.targetUser) {
+                    const response = await fetch(SIGNALING_SERVER, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'signal',
+                            from: initiator.id,
+                            to: initiator.targetUser,
+                            type: 'disconnect',
+                            data: { reason: 'Пользователь разорвал соединение' }
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    initiator.log(`📤 Сигнал disconnect отправлен: ${JSON.stringify(result)}`, 'info');
+                }
+                
+                // Очищаем сигналы на сервере для обоих пользователей
                 user1.log('🧹 Очистка сигналов на сервере...', 'info');
                 
                 // Очищаем сигналы для user1
@@ -1039,9 +1062,9 @@
         // Функция для активации P2P соединения
         async function startP2PCall() {
             try {
-                // Определяем активного пользователя
-                const activeUser = user1.state === 'calling' ? user1 : user2;
-                const targetUser = activeUser.id === 'user1' ? user2 : user1;
+                // Определяем активного пользователя (инициатора)
+                const activeUser = globalInitiator === 'user1' ? user1 : user2;
+                const targetUser = { id: activeUser.targetUser };
                 
                 activeUser.log('📞 Активация P2P соединения...', 'info');
                 
@@ -1057,13 +1080,20 @@
                         video: true,
                         audio: true
                     });
-                    activeUser.localStream.getTracks().forEach(track => {
-                        activeUser.peerConnection.addTrack(track, activeUser.localStream);
-                    });
                     
                     // Показываем локальное видео
                     const localVideo = document.getElementById(`localVideo${activeUser.id === 'user1' ? '1' : '2'}`);
                     localVideo.srcObject = activeUser.localStream;
+                    
+                    activeUser.log('📹 Локальный поток получен и отображен', 'success');
+                }
+                
+                // Добавляем локальные треки к PeerConnection
+                if (activeUser.localStream) {
+                    activeUser.localStream.getTracks().forEach(track => {
+                        activeUser.peerConnection.addTrack(track, activeUser.localStream);
+                    });
+                    activeUser.log('📤 Локальные треки добавлены к PeerConnection', 'info');
                 }
                 
                 // Создаем offer для P2P соединения
@@ -1108,3 +1138,4 @@
     </script>
 </body>
 </html>
+
