@@ -31,6 +31,8 @@
             <button onclick="resetUser1()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
+            <button onclick="startCall('user1')" id="startCallBtn1" disabled style="background: #4CAF50; color: white; display: none;">📞 Позвонить</button>
+        <button onclick="resetBothUsers()" id="resetBtn1" style="background: #FF9800; color: white; display: inline-block;">🔄 Сбросить состояние</button>
             <button onclick="testOffer1()" id="offerBtn1" disabled style="background: #2196F3; color: white; display: none;">📞 Начать звонок</button>
             <button onclick="startP2PCall()" id="p2pBtn1" disabled style="background: #9C27B0; color: white; display: none;">📞 Связь</button>
             <button onclick="disconnectCall()" id="disconnectBtn1" disabled style="background: #f44336; color: white; display: none;">🔌 Разорвать соединение</button>
@@ -53,6 +55,7 @@
             <button onclick="resetUser2()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
+            <button onclick="startCall('user2')" id="startCallBtn2" disabled style="background: #4CAF50; color: white; display: none;">📞 Позвонить</button>
             <button onclick="testOffer2()" id="offerBtn2" disabled style="background: #2196F3; color: white; display: none;">📤 Начать звонок</button>
             <button onclick="startP2PCall()" id="p2pBtn2" disabled style="background: #9C27B0; color: white; display: none;">📞 Связь</button>
             <button onclick="disconnectCall()" id="disconnectBtn2" disabled style="background: #f44336; color: white; display: none;">🔌 Разорвать соединение</button>
@@ -85,7 +88,7 @@
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { 
-                    urls: 'turn:62.84.126.200:3478',
+                    urls: 'turn:89.169.141.202:3478',
                     username: 'lizaapp',
                     credential: 'lizaapp123'
                 },
@@ -167,6 +170,9 @@
                 user.interval = setInterval(() => checkSignals(user), 1000); // Проверяем каждую секунду
                 checkSignals(user);
                 
+                // Обновляем кнопки только для инициализированного пользователя
+                updateCallButtons(user);
+                
             } catch (error) {
                 user.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
             }
@@ -192,16 +198,25 @@
             caller.log(`📤 Отправка ping к ${target.id}`, 'warning');
             
             try {
+                const pingData = {
+                    action: 'ping',
+                    from: caller.id,
+                    to: target.id,
+                    data: { timestamp: Date.now() }
+                };
+                caller.log(`📤 Отправляем ping данные: ${JSON.stringify(pingData)}`, 'info');
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут
+                
                 const response = await fetch(SIGNALING_SERVER, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'ping',
-                        from: caller.id,
-                        to: target.id,
-                        data: { timestamp: Date.now() }
-                    })
+                    body: JSON.stringify(pingData),
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 const result = await response.json();
                 caller.log(`📡 Ответ сервера: ${JSON.stringify(result)}`, 'info');
@@ -218,7 +233,11 @@
                     globalInitiator = null;
                 }
             } catch (error) {
-                caller.log(`❌ Ошибка: ${error.message}`, 'error');
+                if (error.name === 'AbortError') {
+                    caller.log(`❌ Таймаут отправки ping (10 сек)`, 'error');
+                } else {
+                    caller.log(`❌ Ошибка отправки ping: ${error.message}`, 'error');
+                }
                 caller.state = 'idle';
                 caller.targetUser = null;
                 globalInitiator = null;
@@ -386,6 +405,115 @@
         
         // ===== ОБЩИЕ ФУНКЦИИ =====
         
+        // Функция для полного инициирования вызова (ping -> pong -> offer -> answer -> P2P)
+        async function startCall(userId) {
+            const user = userId === 'user1' ? user1 : user2;
+            const targetId = document.getElementById(`${userId}Target`).value;
+            
+            if (!targetId) {
+                user.log('❌ Не указан целевой пользователь', 'error');
+                return;
+            }
+            
+            // Проверяем, что пользователь в состоянии idle
+            if (user.state !== 'idle') {
+                user.log(`❌ Нельзя начать вызов - состояние: ${user.state}. Сначала сбросьте состояние.`, 'error');
+                return;
+            }
+            
+            // Проверяем, что целевой пользователь тоже в состоянии idle
+            const targetUser = targetId === 'user1' ? user1 : user2;
+            if (targetUser.state !== 'idle') {
+                user.log(`❌ Нельзя начать вызов - целевой пользователь ${targetId} в состоянии: ${targetUser.state}. Сначала сбросьте состояние.`, 'error');
+                return;
+            }
+            
+            // Проверяем, что целевой пользователь запущен
+            if (!targetUser.id) {
+                user.log(`❌ Нельзя начать вызов - целевой пользователь ${targetId} не запущен. Сначала запустите его.`, 'error');
+                return;
+            }
+            
+            user.log(`📞 Начинаем полный вызов к ${targetId}`, 'info');
+            
+            try {
+                // Шаг 1: Отправляем ping (как кнопка "Отправить ping к целевому пользователю")
+                user.log(`📤 Шаг 1: Отправляем ping к ${targetId}`, 'info');
+                await sendPingToTarget(userId);
+                
+                // Ждем установления ping-pong соединения
+                user.log(`⏳ Ожидаем pong от ${targetId}...`, 'info');
+                await waitForState(user, 'connected', 10000); // Ждем до 10 секунд
+                
+                // Шаг 2: Отправляем offer (как кнопка "Начать звонок")
+                user.log(`📤 Шаг 2: Отправляем offer к ${targetId}`, 'info');
+                if (userId === 'user1') {
+                    await testOffer1();
+                } else {
+                    await testOffer2();
+                }
+                
+                // Ждем получения answer от другого пользователя
+                user.log(`⏳ Ожидаем answer от ${targetId}...`, 'info');
+                await waitForAnswer(user, 10000); // Ждем до 10 секунд
+                
+                // Шаг 3: Активируем P2P соединение (как кнопка "Связь")
+                user.log(`📤 Шаг 3: Активируем P2P соединение`, 'info');
+                await startP2PCall();
+                
+                user.log(`✅ Полный вызов успешно установлен!`, 'success');
+                
+            } catch (error) {
+                user.log(`❌ Ошибка при инициировании вызова: ${error.message}`, 'error');
+            }
+        }
+        
+        // Функция для ожидания определенного состояния пользователя
+        async function waitForState(user, targetState, timeoutMs = 10000) {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                
+                const checkState = () => {
+                    if (user.state === targetState) {
+                        user.log(`✅ Состояние достигнуто: ${targetState}`, 'success');
+                        resolve();
+                    } else if (Date.now() - startTime > timeoutMs) {
+                        user.log(`⏰ Таймаут ожидания состояния ${targetState}`, 'warning');
+                        reject(new Error(`Таймаут ожидания состояния ${targetState}`));
+                    } else {
+                        setTimeout(checkState, 500); // Проверяем каждые 500мс
+                    }
+                };
+                
+                checkState();
+            });
+        }
+        
+        // Функция для ожидания получения answer (WebRTC соединение установлено)
+        async function waitForAnswer(user, timeoutMs = 10000) {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                
+                const checkAnswer = () => {
+                    // Проверяем, что WebRTC соединение установлено (есть remote stream)
+                    const videoId = user.id === 'user1' ? 'remoteVideo1' : 'remoteVideo2';
+                    const remoteVideo = document.getElementById(videoId);
+                    
+                    if (remoteVideo && remoteVideo.srcObject && user.state === 'calling') {
+                        user.log(`✅ Answer получен, WebRTC соединение установлено`, 'success');
+                        resolve();
+                    } else if (Date.now() - startTime > timeoutMs) {
+                        user.log(`⏰ Таймаут ожидания answer`, 'warning');
+                        reject(new Error(`Таймаут ожидания answer`));
+                    } else {
+                        setTimeout(checkAnswer, 500); // Проверяем каждые 500мс
+                    }
+                };
+                
+                checkAnswer();
+            });
+        }
+        
         async function checkWebRTCSignals(user) {
             // Защита от множественных одновременных запросов
             if (user.checkingWebRTCSignals) {
@@ -450,6 +578,8 @@
                 return;
             }
             user.checkingSignals = true;
+            
+            user.log(`🔍 checkSignals для ${user.id}, состояние: ${user.state}`, 'info');
             
             try {
                 const url = `${SIGNALING_SERVER}?action=signals&userId=${user.id}&since=${user.lastSignalId}`;
@@ -561,86 +691,115 @@
         
         function updateCallButtons(user) {
             if (user.id === 'user1') {
+                const startCallBtn = document.getElementById('startCallBtn1');
                 const offerBtn = document.getElementById('offerBtn1');
                 const p2pBtn = document.getElementById('p2pBtn1');
                 const disconnectBtn = document.getElementById('disconnectBtn1');
                 
-                // Показываем кнопки только глобальному инициатору
-                if (globalInitiator === 'user1') {
-                    if (user.state === 'connected') {
-                        // После ping-pong показываем кнопку "Начать звонок"
-                        offerBtn.style.display = 'inline-block';
-                        offerBtn.disabled = false;
+                // Показываем кнопки в зависимости от состояния
+                if (user.state === 'idle') {
+                    // В состоянии idle показываем кнопку "Позвонить" для всех пользователей
+                    startCallBtn.style.display = 'inline-block';
+                    startCallBtn.disabled = false;
+                    offerBtn.style.display = 'none';
+                    p2pBtn.style.display = 'none';
+                    disconnectBtn.style.display = 'none';
+                } else if (user.state === 'connected') {
+                    // После ping-pong показываем кнопку "Начать звонок" только инициатору
+                    if (globalInitiator === 'user1') {
+                        startCallBtn.style.display = 'none';
+                    offerBtn.style.display = 'inline-block';
+                    offerBtn.disabled = false;
                         p2pBtn.style.display = 'none';
                         disconnectBtn.style.display = 'none';
-                    } else if (user.state === 'calling') {
-                        // После успешного offer/answer показываем кнопку "Начать звонок"
+                    } else {
+                        // Не инициатор - скрываем все кнопки
+                        startCallBtn.style.display = 'none';
+                        offerBtn.style.display = 'none';
+                        p2pBtn.style.display = 'none';
+                        disconnectBtn.style.display = 'none';
+                    }
+                } else if (user.state === 'calling') {
+                    // После успешного offer/answer показываем кнопку "Связь" только инициатору
+                    if (globalInitiator === 'user1') {
+                        startCallBtn.style.display = 'none';
                         offerBtn.style.display = 'none';
                         p2pBtn.style.display = 'inline-block';
                         p2pBtn.disabled = false;
+                    disconnectBtn.style.display = 'inline-block';
+                    disconnectBtn.disabled = false;
+                } else {
+                        // Не инициатор - показываем только кнопку disconnect
+                        startCallBtn.style.display = 'none';
+                    offerBtn.style.display = 'none';
+                        p2pBtn.style.display = 'none';
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.disabled = false;
-                    } else {
-                        offerBtn.style.display = 'none';
-                        p2pBtn.style.display = 'none';
-                        disconnectBtn.style.display = 'none';
                     }
                 } else {
-                    // Не инициатор - показываем только кнопку disconnect в состоянии calling
+                    startCallBtn.style.display = 'none';
                     offerBtn.style.display = 'none';
                     p2pBtn.style.display = 'none';
-                    if (user.state === 'calling') {
-                        disconnectBtn.style.display = 'inline-block';
-                        disconnectBtn.disabled = false;
-                    } else {
-                        disconnectBtn.style.display = 'none';
-                    }
+                    disconnectBtn.style.display = 'none';
                 }
             } else if (user.id === 'user2') {
+                const startCallBtn = document.getElementById('startCallBtn2');
                 const offerBtn = document.getElementById('offerBtn2');
                 const p2pBtn = document.getElementById('p2pBtn2');
                 const disconnectBtn = document.getElementById('disconnectBtn2');
                 const autoAnswerInfo = document.getElementById('autoAnswerInfo');
                 
-                // Показываем кнопки только глобальному инициатору
-                if (globalInitiator === 'user2') {
-                    if (user.state === 'connected') {
-                        // После ping-pong показываем кнопку "Начать звонок"
-                        offerBtn.style.display = 'inline-block';
-                        offerBtn.disabled = false;
+                // Показываем кнопки в зависимости от состояния
+                if (user.state === 'idle') {
+                    // В состоянии idle показываем кнопку "Позвонить" для всех пользователей
+                    startCallBtn.style.display = 'inline-block';
+                    startCallBtn.disabled = false;
+                    offerBtn.style.display = 'none';
+                    p2pBtn.style.display = 'none';
+                    disconnectBtn.style.display = 'none';
+                    autoAnswerInfo.style.display = 'none';
+                } else if (user.state === 'connected') {
+                    // После ping-pong показываем кнопку "Начать звонок" только инициатору
+                    if (globalInitiator === 'user2') {
+                        startCallBtn.style.display = 'none';
+                    offerBtn.style.display = 'inline-block';
+                    offerBtn.disabled = false;
                         p2pBtn.style.display = 'none';
                         disconnectBtn.style.display = 'none';
                         autoAnswerInfo.style.display = 'none';
-                    } else if (user.state === 'calling') {
-                        // После успешного offer/answer показываем кнопку "Начать звонок"
+                    } else {
+                        // Не инициатор - скрываем все кнопки, показываем авто-answer info
+                        startCallBtn.style.display = 'none';
+                        offerBtn.style.display = 'none';
+                        p2pBtn.style.display = 'none';
+                        disconnectBtn.style.display = 'none';
+                    autoAnswerInfo.style.display = 'block';
+                    }
+                } else if (user.state === 'calling') {
+                    // После успешного offer/answer показываем кнопку "Связь" только инициатору
+                    if (globalInitiator === 'user2') {
+                        startCallBtn.style.display = 'none';
                         offerBtn.style.display = 'none';
                         p2pBtn.style.display = 'inline-block';
                         p2pBtn.disabled = false;
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.disabled = false;
                         autoAnswerInfo.style.display = 'none';
-                    } else {
-                        offerBtn.style.display = 'none';
-                        p2pBtn.style.display = 'none';
-                        disconnectBtn.style.display = 'none';
-                        autoAnswerInfo.style.display = 'none';
-                    }
                 } else {
-                    // Не инициатор - показываем только кнопку disconnect в состоянии calling
+                        // Не инициатор - показываем только кнопку disconnect
+                        startCallBtn.style.display = 'none';
                     offerBtn.style.display = 'none';
-                    p2pBtn.style.display = 'none';
-                    if (user.state === 'calling') {
+                        p2pBtn.style.display = 'none';
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.disabled = false;
                         autoAnswerInfo.style.display = 'none';
-                    } else {
-                        disconnectBtn.style.display = 'none';
-                        if (user.state === 'connected') {
-                            autoAnswerInfo.style.display = 'block';
-                        } else {
-                            autoAnswerInfo.style.display = 'none';
-                        }
                     }
+                } else {
+                    startCallBtn.style.display = 'none';
+                    offerBtn.style.display = 'none';
+                    p2pBtn.style.display = 'none';
+                    disconnectBtn.style.display = 'none';
+                    autoAnswerInfo.style.display = 'none';
                 }
             }
         }
@@ -776,13 +935,13 @@
             try {
                 // Устанавливаем удаленное описание
                 await user.peerConnection.setRemoteDescription(signal.data);
-                user.log(`✅ Offer/Answer обмен завершен!`, 'success');
-                
+            user.log(`✅ Offer/Answer обмен завершен!`, 'success');
+            
                 // Переключаем polling на проверку disconnect сигналов
-                if (user.interval) {
-                    clearInterval(user.interval);
-                    user.interval = null;
-                    user.log(`⏹️ Polling остановлен - WebRTC соединение установлено`, 'info');
+            if (user.interval) {
+                clearInterval(user.interval);
+                user.interval = null;
+                user.log(`⏹️ Polling остановлен - WebRTC соединение установлено`, 'info');
                 }
                 
                 // Запускаем polling для проверки disconnect сигналов
@@ -944,6 +1103,8 @@
             user1.targetUser = null;
             // globalInitiator НЕ сбрасываем здесь - это делается в disconnectCall
             
+            document.getElementById('startCallBtn1').style.display = 'none';
+            document.getElementById('startCallBtn1').disabled = true;
             document.getElementById('offerBtn1').style.display = 'none';
             document.getElementById('offerBtn1').disabled = true;
             document.getElementById('p2pBtn1').style.display = 'none';
@@ -979,6 +1140,8 @@
             user2.targetUser = null;
             // globalInitiator НЕ сбрасываем здесь - это делается в disconnectCall
             
+            document.getElementById('startCallBtn2').style.display = 'none';
+            document.getElementById('startCallBtn2').disabled = true;
             document.getElementById('offerBtn2').style.display = 'none';
             document.getElementById('offerBtn2').disabled = true;
             document.getElementById('p2pBtn2').style.display = 'none';
@@ -1019,8 +1182,8 @@
             }
             
             // Очищаем сигналы на сервере для обоих пользователей
-            user1.log('🧹 Очистка сигналов на сервере...', 'info');
-            
+                user1.log('🧹 Очистка сигналов на сервере...', 'info');
+                
             try {
                 // Очищаем сигналы для user1
                 const response1 = await fetch(`${SIGNALING_SERVER}?action=delete&userId=user1`);
@@ -1042,6 +1205,23 @@
             // Сбрасываем состояние обоих пользователей
             resetUser1();
             resetUser2();
+            
+            // Сбрасываем глобального инициатора
+            globalInitiator = null;
+            user1.log('🔄 globalInitiator сброшен', 'info');
+            user2.log('🔄 globalInitiator сброшен', 'info');
+            
+            // Обновляем кнопки для обоих пользователей
+            updateAllCallButtons();
+        }
+        
+        // Функция для сброса состояния обоих пользователей
+        function resetBothUsers() {
+            user1.log('🔄 Сбрасываем состояние обоих пользователей', 'info');
+            resetUser1();
+            resetUser2();
+            globalInitiator = null;
+            user1.log('✅ Состояние обоих пользователей сброшено', 'success');
         }
         
         // Функция для активации P2P соединения
