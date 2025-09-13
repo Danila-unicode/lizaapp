@@ -15,10 +15,10 @@ const WSS_PORT = process.env.WSS_PORT || 8080;
 
 // MySQL подключение
 const dbConfig = {
-    host: 'localhost',
-    user: 'lizaapp_1w1d2sd3268',
-    password: 'aM1oX3yE0j',
-    database: 'lizaapp_dsfg12df1121q5sd2694',
+    host: 'lizaapp.wg01.ru',
+    user: 'lizaapp_q2f112f1c',
+    password: 'mS2rJ7uK5r',
+    database: 'lizaapp_fgdg1c1d551v1d',
     port: 3306
 };
 
@@ -51,61 +51,10 @@ try {
     };
     console.log('✅ SSL сертификаты загружены');
 } catch (error) {
-    console.log('⚠️ SSL сертификаты не найдены, запускаем без HTTPS');
+    console.log('⚠️ SSL сертификаты не найдены, используем HTTP');
 }
 
-// HTTPS сервер
-let httpsServer = null;
-if (httpsOptions) {
-    httpsServer = https.createServer(httpsOptions, app);
-}
-
-// WebSocket сервер (HTTPS или HTTP)
-const wss = httpsOptions ? 
-    new WebSocket.Server({ server: httpsServer }) :
-    new WebSocket.Server({ port: WSS_PORT });
-
-// Хранилище подключенных пользователей
-const connectedUsers = new Map();
-
-// Хранилище сигналов для HTTP API
-const signals = new Map(); // userId -> [signals]
-const userRooms = new Map();
-
-// Функция инициализации базы данных
-async function initDatabase() {
-    try {
-        db = await mysql.createConnection(dbConfig);
-        console.log('✅ Подключение к MySQL установлено');
-        
-        // Создаем таблицы если их нет
-        await db.execute(`
-            CREATE TABLE IF NOT EXISTS users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                login VARCHAR(50) UNIQUE NOT NULL,
-                password VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-        `);
-        
-        await db.execute(`
-            CREATE TABLE IF NOT EXISTS active_sessions (
-                user_id INT NOT NULL,
-                session_token VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )
-        `);
-        
-        console.log('✅ Таблицы users и active_sessions готовы');
-    } catch (error) {
-        console.error('❌ Ошибка подключения к MySQL:', error);
-        process.exit(1);
-    }
-}
-
-// Логирование
+// Функция логирования
 function log(message, type = 'info') {
     const timestamp = new Date().toISOString();
     const prefix = type === 'error' ? '❌' : type === 'warning' ? '⚠️' : type === 'success' ? '✅' : '📝';
@@ -138,37 +87,82 @@ function saveSignal(from, to, type, data) {
     log(`Сигнал сохранен: ${type} от ${from} к ${to}`, 'info');
 }
 
-// Функция для регистрации пользователя
-async function registerUser(login, password) {
+// Хранилище подключенных пользователей
+const connectedUsers = new Map();
+
+// Хранилище сигналов для HTTP API
+const signals = new Map(); // userId -> [signals]
+const userRooms = new Map();
+
+// Функция инициализации базы данных
+async function initDatabase() {
+    try {
+        db = await mysql.createConnection(dbConfig);
+        console.log('✅ Подключение к MySQL установлено');
+        
+        // Создаем таблицы если их нет
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                phone VARCHAR(15) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS active_sessions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                token VARCHAR(255) UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        `);
+        
+        // Создаем индексы
+        await db.execute(`CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)`);
+        await db.execute(`CREATE INDEX IF NOT EXISTS idx_active_sessions_user_id ON active_sessions(user_id)`);
+        await db.execute(`CREATE INDEX IF NOT EXISTS idx_active_sessions_token ON active_sessions(token)`);
+        
+        console.log('✅ База данных инициализирована');
+    } catch (error) {
+        console.error('❌ Ошибка подключения к базе данных:', error);
+        process.exit(1);
+    }
+}
+
+// Функции для работы с пользователями
+async function registerUser(phone, password) {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
         const [result] = await db.execute(
-            'INSERT INTO users (login, password) VALUES (?, ?)',
-            [login, hashedPassword]
+            'INSERT INTO users (phone, password_hash) VALUES (?, ?)',
+            [phone, hashedPassword]
         );
-        log(`Пользователь зарегистрирован: ${login} (ID: ${result.insertId})`, 'info');
         return { success: true, userId: result.insertId };
     } catch (error) {
         if (error.code === 'ER_DUP_ENTRY') {
-            log(`Пользователь уже существует: ${login}`, 'warning');
             return { success: false, error: 'Пользователь уже существует' };
         }
-        log(`Ошибка регистрации пользователя: ${error.message}`, 'error');
         return { success: false, error: 'Ошибка регистрации' };
     }
 }
 
-// Функция для авторизации пользователя
-async function loginUser(login, password) {
+async function loginUser(phone, password) {
     try {
-        const [rows] = await db.execute('SELECT id, password FROM users WHERE login = ?', [login]);
+        const [rows] = await db.execute(
+            'SELECT id, password_hash FROM users WHERE phone = ?',
+            [phone]
+        );
         
         if (rows.length === 0) {
             return { success: false, error: 'Пользователь не найден' };
         }
         
         const user = rows[0];
-        const isValidPassword = await bcrypt.compare(password, user.password);
+        const isValidPassword = await bcrypt.compare(password, user.password_hash);
         
         if (!isValidPassword) {
             return { success: false, error: 'Неверный пароль' };
@@ -176,36 +170,27 @@ async function loginUser(login, password) {
         
         // Создаем сессию
         const sessionToken = uuidv4();
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 часа
+        
         await db.execute(
-            'INSERT INTO active_sessions (user_id, session_token) VALUES (?, ?)',
-            [user.id, sessionToken]
+            'INSERT INTO active_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
+            [user.id, sessionToken, expiresAt]
         );
         
-        log(`Пользователь авторизован: ${login} (ID: ${user.id})`, 'info');
-        return { success: true, userId: user.id, sessionToken };
+        return { 
+            success: true, 
+            userId: user.id, 
+            sessionToken: sessionToken 
+        };
     } catch (error) {
-        log(`Ошибка авторизации пользователя: ${error.message}`, 'error');
         return { success: false, error: 'Ошибка авторизации' };
     }
 }
 
-// Функция для получения всех пользователей
-async function getAllUsers() {
-    try {
-        const [rows] = await db.execute('SELECT id, login FROM users ORDER BY login');
-        log(`Получено пользователей из MySQL: ${rows.length}`, 'info');
-        return rows;
-    } catch (error) {
-        log(`Ошибка получения пользователей из MySQL: ${error.message}`, 'error');
-        return [];
-    }
-}
-
-// Функция для проверки активной сессии
 async function validateSession(sessionToken) {
     try {
         const [rows] = await db.execute(
-            'SELECT u.id, u.login FROM users u JOIN active_sessions s ON u.id = s.user_id WHERE s.session_token = ?',
+            'SELECT u.id, u.phone FROM users u JOIN active_sessions s ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > NOW()',
             [sessionToken]
         );
         
@@ -215,20 +200,26 @@ async function validateSession(sessionToken) {
         
         return { success: true, user: rows[0] };
     } catch (error) {
-        log(`Ошибка проверки сессии: ${error.message}`, 'error');
-        return { success: false, error: 'Ошибка проверки сессии' };
+        return { success: false, error: 'Ошибка валидации сессии' };
     }
 }
 
-// Функция для выхода из системы
 async function logoutUser(sessionToken) {
     try {
-        await db.execute('DELETE FROM active_sessions WHERE session_token = ?', [sessionToken]);
-        log(`Пользователь вышел из системы: ${sessionToken}`, 'info');
+        await db.execute('DELETE FROM active_sessions WHERE token = ?', [sessionToken]);
         return { success: true };
     } catch (error) {
-        log(`Ошибка выхода из системы: ${error.message}`, 'error');
         return { success: false, error: 'Ошибка выхода' };
+    }
+}
+
+async function getAllUsers() {
+    try {
+        const [rows] = await db.execute('SELECT id, phone, created_at FROM users ORDER BY created_at DESC');
+        return rows;
+    } catch (error) {
+        console.error('Ошибка получения пользователей:', error);
+        return [];
     }
 }
 
@@ -256,7 +247,7 @@ wss.on('connection', (ws, req) => {
         message: 'Подключение к серверу установлено'
     }));
     
-    // Обработка входящих сообщений
+    // Обработка сообщений
     ws.on('message', (data) => {
         try {
             const message = JSON.parse(data);
@@ -270,16 +261,16 @@ wss.on('connection', (ws, req) => {
         }
     });
     
-    // Обработка отключения
+    // Обработка закрытия соединения
     ws.on('close', () => {
-        log(`Пользователь ${userId} отключился`, 'warning');
-        handleDisconnect(userId);
+        log(`WebSocket соединение закрыто: ${userId}`, 'warning');
+        connectedUsers.delete(userId);
     });
     
     // Обработка ошибок
     ws.on('error', (error) => {
-        log(`Ошибка WebSocket для пользователя ${userId}: ${error.message}`, 'error');
-        handleDisconnect(userId);
+        log(`Ошибка WebSocket для ${userId}: ${error.message}`, 'error');
+        connectedUsers.delete(userId);
     });
 });
 
@@ -310,10 +301,9 @@ function handleMessage(userId, message) {
             handleIceCandidate(userId, message);
             break;
         case 'disconnect':
-            handleDisconnectSignal(userId, message);
+            handleDisconnect(userId, message);
             break;
         default:
-            log(`Неизвестный тип сообщения: ${message.type}`, 'warning');
             user.ws.send(JSON.stringify({
                 type: 'error',
                 message: `Неизвестный тип сообщения: ${message.type}`
@@ -350,6 +340,14 @@ function handlePong(userId, message) {
     const user = connectedUsers.get(userId);
     if (!user) return;
     
+    if (user.state !== 'connecting') {
+        log(`Игнорируем pong от ${userId} - состояние: ${user.state}`, 'warning');
+        return;
+    }
+    
+    user.state = 'connected';
+    user.targetUser = message.to;
+    
     log(`Pong от ${userId} к ${message.to}`, 'info');
     
     // Пересылаем pong целевому пользователю
@@ -359,27 +357,12 @@ function handlePong(userId, message) {
         to: message.to,
         data: message.data
     });
-    
-    // Обновляем состояние обоих пользователей
-    const targetUser = connectedUsers.get(message.to);
-    if (targetUser) {
-        targetUser.state = 'connected';
-        targetUser.targetUser = userId;
-        user.state = 'connected';
-        
-        log(`Соединение установлено между ${userId} и ${message.to}`, 'success');
-    }
 }
 
 // Обработка offer
 function handleOffer(userId, message) {
     const user = connectedUsers.get(userId);
     if (!user) return;
-    
-    if (user.state !== 'connected') {
-        log(`Игнорируем offer от ${userId} - состояние: ${user.state}`, 'warning');
-        return;
-    }
     
     log(`Offer от ${userId} к ${message.to}`, 'info');
     
@@ -397,11 +380,6 @@ function handleAnswer(userId, message) {
     const user = connectedUsers.get(userId);
     if (!user) return;
     
-    if (user.state !== 'connected') {
-        log(`Игнорируем answer от ${userId} - состояние: ${user.state}`, 'warning');
-        return;
-    }
-    
     log(`Answer от ${userId} к ${message.to}`, 'info');
     
     // Пересылаем answer целевому пользователю
@@ -413,14 +391,14 @@ function handleAnswer(userId, message) {
     });
 }
 
-// Обработка ICE кандидатов
+// Обработка ICE candidate
 function handleIceCandidate(userId, message) {
     const user = connectedUsers.get(userId);
     if (!user) return;
     
-    log(`ICE кандидат от ${userId} к ${message.to}`, 'info');
+    log(`ICE candidate от ${userId} к ${message.to}`, 'info');
     
-    // Пересылаем ICE кандидат целевому пользователю
+    // Пересылаем ICE candidate целевому пользователю
     forwardMessage(message.to, {
         type: 'ice-candidate',
         from: userId,
@@ -429,24 +407,26 @@ function handleIceCandidate(userId, message) {
     });
 }
 
-// Обработка сигнала disconnect
-function handleDisconnectSignal(userId, message) {
+// Обработка disconnect
+function handleDisconnect(userId, message) {
     const user = connectedUsers.get(userId);
     if (!user) return;
     
-    log(`Сигнал disconnect от ${userId} к ${message.to}`, 'warning');
+    log(`Disconnect от ${userId}`, 'info');
     
-    // Пересылаем disconnect целевому пользователю
-    forwardMessage(message.to, {
-        type: 'disconnect',
-        from: userId,
-        to: message.to,
-        data: message.data
-    });
-    
-    // Сбрасываем состояние пользователя
+    // Сбрасываем состояние
     user.state = 'idle';
     user.targetUser = null;
+    
+    // Уведомляем целевого пользователя
+    if (message.to) {
+        forwardMessage(message.to, {
+            type: 'disconnect',
+            from: userId,
+            to: message.to,
+            data: message.data
+        });
+    }
 }
 
 // Пересылка сообщения
@@ -457,55 +437,13 @@ function forwardMessage(targetUserId, message) {
         return;
     }
     
-    if (targetUser.ws.readyState === WebSocket.OPEN) {
+    try {
         targetUser.ws.send(JSON.stringify(message));
-        log(`Сообщение ${message.type} переслано от ${message.from} к ${targetUserId}`, 'success');
-    } else {
-        log(`WebSocket для пользователя ${targetUserId} не открыт`, 'warning');
+        log(`Сообщение переслано к ${targetUserId}`, 'info');
+    } catch (error) {
+        log(`Ошибка пересылки сообщения к ${targetUserId}: ${error.message}`, 'error');
     }
 }
-
-// Обработка отключения пользователя
-function handleDisconnect(userId) {
-    const user = connectedUsers.get(userId);
-    if (!user) return;
-    
-    // Уведомляем целевого пользователя об отключении
-    if (user.targetUser) {
-        const targetUser = connectedUsers.get(user.targetUser);
-        if (targetUser && targetUser.ws.readyState === WebSocket.OPEN) {
-            targetUser.ws.send(JSON.stringify({
-                type: 'disconnect',
-                from: userId,
-                to: user.targetUser,
-                data: { reason: 'user_disconnected' }
-            }));
-            
-            // Сбрасываем состояние целевого пользователя
-            targetUser.state = 'idle';
-            targetUser.targetUser = null;
-        }
-    }
-    
-    // Удаляем пользователя из хранилища
-    connectedUsers.delete(userId);
-    log(`Пользователь ${userId} удален из системы`, 'info');
-}
-
-// HTTP API для получения статистики
-app.get('/api/stats', (req, res) => {
-    const stats = {
-        connectedUsers: connectedUsers.size,
-        users: Array.from(connectedUsers.values()).map(user => ({
-            id: user.id,
-            state: user.state,
-            targetUser: user.targetUser,
-            connectedAt: user.connectedAt,
-            ip: user.ip
-        }))
-    };
-    res.json(stats);
-});
 
 // HTTP API для получения сигналов
 app.get('/api/signaling', (req, res) => {
@@ -597,24 +535,17 @@ app.post('/api/signaling', (req, res) => {
             break;
             
         case 'ping':
-            try {
-                // Сохраняем ping сигнал
-                log(`Сохраняем ping от ${from} к ${to}`, 'info');
-                saveSignal(from, to, 'ping', data);
-                
-                // Автоматически отправляем pong обратно
-                log(`Сохраняем pong от ${to} к ${from}`, 'info');
-                saveSignal(to, from, 'pong', { 
-                    timestamp: Date.now(),
-                    originalPing: data 
-                });
-                
-                log(`Ping от ${from} к ${to} - автоматически отправлен pong`, 'info');
-                res.json({ success: true, message: 'Ping обработан, pong отправлен' });
-            } catch (error) {
-                log(`Ошибка при обработке ping: ${error.message}`, 'error');
-                res.json({ success: false, message: 'Ошибка обработки ping' });
-            }
+            // Сохраняем ping сигнал
+            saveSignal(from, to, 'ping', data);
+            
+            // Автоматически отправляем pong обратно
+            saveSignal(to, from, 'pong', { 
+                timestamp: Date.now(),
+                originalPing: data 
+            });
+            
+            log(`Ping от ${from} к ${to} - автоматически отправлен pong`, 'info');
+            res.json({ success: true, message: 'Ping обработан, pong отправлен' });
             break;
             
         case 'signal':
@@ -656,7 +587,7 @@ app.post('/api/register', async (req, res) => {
             res.status(400).json({ success: false, error: result.error });
         }
     } catch (error) {
-        res.status(500).json({ success: false, error: 'Ошибка регистрации пользователя' });
+        res.status(500).json({ success: false, error: 'Ошибка регистрации' });
     }
 });
 
@@ -703,56 +634,54 @@ app.post('/api/logout', async (req, res) => {
     }
 });
 
-// Запуск сервера
-async function startServer() {
+// API для проверки сессии
+app.get('/api/validate', async (req, res) => {
     try {
-        // Инициализируем базу данных
-        await initDatabase();
+        const { sessionToken } = req.query;
+        if (!sessionToken) {
+            return res.status(400).json({ success: false, error: 'Токен сессии обязателен' });
+        }
         
-        if (httpsOptions && httpsServer) {
-            // HTTPS режим
-            httpsServer.listen(PORT, () => {
-                log(`HTTPS сервер запущен на порту ${PORT}`, 'success');
-                log(`WSS сервер запущен на порту ${WSS_PORT}`, 'success');
-                log(`Статистика доступна по адресу: https://lizamsg.ru:${PORT}/api/stats`, 'info');
-                log(`WebSocket доступен по адресу: wss://lizamsg.ru:${WSS_PORT}`, 'info');
-            });
+        const result = await validateSession(sessionToken);
+        if (result.success) {
+            res.json({ success: true, user: result.user });
         } else {
-            // HTTP режим (fallback)
-            app.listen(PORT, () => {
-                log(`HTTP сервер запущен на порту ${PORT}`, 'success');
-                log(`WebSocket сервер запущен на порту ${WSS_PORT}`, 'success');
-                log(`Статистика доступна по адресу: http://localhost:${PORT}/api/stats`, 'info');
-            });
+            res.status(401).json({ success: false, error: result.error });
         }
     } catch (error) {
-        log(`Ошибка запуска сервера: ${error.message}`, 'error');
-        process.exit(1);
+        res.status(500).json({ success: false, error: 'Ошибка валидации' });
     }
+});
+
+// Создание WebSocket сервера
+const wss = new WebSocket.Server({ 
+    port: WSS_PORT,
+    verifyClient: (info) => {
+        // Разрешаем все соединения
+        return true;
+    }
+});
+
+// Запуск сервера
+async function startServer() {
+    await initDatabase();
+    
+    if (httpsOptions) {
+        const httpsServer = https.createServer(httpsOptions, app);
+        httpsServer.listen(PORT, () => {
+            log(`HTTPS сервер запущен на порту ${PORT}`, 'success');
+        });
+    } else {
+        app.listen(PORT, () => {
+            log(`HTTP сервер запущен на порту ${PORT}`, 'success');
+        });
+    }
+    
+    log(`WebSocket сервер запущен на порту ${WSS_PORT}`, 'success');
 }
 
-startServer();
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-    log('Получен сигнал SIGINT, завершаем работу...', 'warning');
-    
-    // Закрываем все WebSocket соединения
-    connectedUsers.forEach((user) => {
-        if (user.ws.readyState === WebSocket.OPEN) {
-            user.ws.close();
-        }
-    });
-    
-    wss.close(() => {
-        log('WebSocket сервер остановлен', 'info');
-        if (httpsServer) {
-            httpsServer.close(() => {
-                log('HTTPS сервер остановлен', 'info');
-                process.exit(0);
-            });
-        } else {
-            process.exit(0);
-        }
-    });
+startServer().catch(error => {
+    log(`Ошибка запуска сервера: ${error.message}`, 'error');
+    process.exit(1);
 });
+
