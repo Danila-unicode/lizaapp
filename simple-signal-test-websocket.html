@@ -27,12 +27,12 @@
             <input type="text" id="user1Id" value="user1" placeholder="User ID">
             <input type="text" id="user1Target" value="user2" placeholder="Целевой пользователь">
             <button onclick="startUser1()">Запустить User 1</button>
-            <button onclick="sendPingToTarget('user1')">Отправить ping к целевому пользователю</button>
-            <button onclick="resetUser1()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
+            <button onclick="sendPingToTarget('user1')" style="display: none;">Отправить ping к целевому пользователю</button>
+            <button onclick="resetUser1()" style="background: #ff9800; color: white; display: none;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
             <button onclick="startCall('user1')" id="startCallBtn1" disabled style="background: #4CAF50; color: white; display: none;">📞 Позвонить</button>
-        <button onclick="resetBothUsers()" id="resetBtn1" style="background: #FF9800; color: white; display: inline-block;">🔄 Сбросить состояние</button>
+        <button onclick="resetBothUsers()" id="resetBtn1" style="background: #FF9800; color: white; display: none;">🔄 Сбросить состояние</button>
             <button onclick="testOffer1()" id="offerBtn1" disabled style="background: #2196F3; color: white; display: none;">📞 Начать звонок</button>
             <button onclick="startP2PCall()" id="p2pBtn1" disabled style="background: #9C27B0; color: white; display: none;">📞 Связь</button>
             <button onclick="disconnectCall()" id="disconnectBtn1" disabled style="background: #f44336; color: white; display: none;">🔌 Разорвать соединение</button>
@@ -51,8 +51,8 @@
             <input type="text" id="user2Id" value="user2" placeholder="User ID">
             <input type="text" id="user2Target" value="user1" placeholder="Целевой пользователь">
             <button onclick="startUser2()">Запустить User 2</button>
-            <button onclick="sendPingToTarget('user2')">Отправить ping к целевому пользователю</button>
-            <button onclick="resetUser2()" style="background: #ff9800; color: white;">🔄 Сбросить состояние</button>
+            <button onclick="sendPingToTarget('user2')" style="display: none;">Отправить ping к целевому пользователю</button>
+            <button onclick="resetUser2()" style="background: #ff9800; color: white; display: none;">🔄 Сбросить состояние</button>
             
         <div style="margin: 10px 0;">
             <button onclick="startCall('user2')" id="startCallBtn2" disabled style="background: #4CAF50; color: white; display: none;">📞 Позвонить</button>
@@ -102,6 +102,7 @@
         
         // Глобальный инициатор соединения
         let globalInitiator = null;
+        let isResetting = false; // Флаг для предотвращения двойного сброса
         
         let user1 = {
             id: 'user1',
@@ -167,7 +168,7 @@
                 
                 // Запускаем polling для получения сигналов
                 if (user.interval) clearInterval(user.interval);
-                user.interval = setInterval(() => checkSignals(user), 1000); // Проверяем каждую секунду
+                user.interval = setInterval(() => checkSignals(user), 3000); // Проверяем каждые 3 секунды
                 checkSignals(user);
                 
                 // Обновляем кнопки только для инициализированного пользователя
@@ -308,10 +309,29 @@
                     } else if (caller.peerConnection.connectionState === 'failed') {
                         caller.log('❌ P2P соединение не удалось', 'error');
                     } else if (caller.peerConnection.connectionState === 'disconnected') {
-                        caller.log('🔌 P2P соединение разорвано - сбрасываем в исходное состояние', 'warning');
-                        // Автоматически сбрасываем пользователя при разрыве соединения
-                        resetUser1();
-                        resetUser2();
+                        if (!isResetting) {
+                            caller.log('🔌 P2P соединение разорвано - сбрасываем в исходное состояние через onconnectionstatechange', 'warning');
+                            isResetting = true;
+                            // Автоматически сбрасываем пользователя при разрыве соединения
+                            resetUser1();
+                            resetUser2();
+                            globalInitiator = null;
+                            updateAllCallButtons();
+                            isResetting = false;
+                            caller.log('✅ Сброс завершен через onconnectionstatechange', 'success');
+                            
+                            // Автоматически перезапускаем пользователей
+                            user1.log('🚀 Автоматический перезапуск user1 через onconnectionstatechange...', 'info');
+                            user2.log('🚀 Автоматический перезапуск user2 через onconnectionstatechange...', 'info');
+                            
+                            // Небольшая задержка перед перезапуском
+                            setTimeout(() => {
+                                startUser(user1, 'user1Id', 'localVideo1');
+                                startUser(user2, 'user2Id', 'localVideo2');
+                            }, 1000);
+                        } else {
+                            caller.log('🔌 P2P соединение разорвано - сброс уже выполнен через disconnectCall', 'info');
+                        }
                     }
                 };
                 
@@ -330,7 +350,7 @@
                 caller.log('✅ Offer отправлен, ожидание answer', 'success');
                 
                 // Запускаем polling для WebRTC сигналов (answer)
-                caller.interval = setInterval(() => checkWebRTCSignals(caller), 1000);
+                caller.interval = setInterval(() => checkWebRTCSignals(caller), 3000);
                 caller.log(`🔄 Запущен polling для WebRTC сигналов (answer)`, 'info');
                 
             } catch (error) {
@@ -843,12 +863,31 @@
                     user.log('✅ P2P соединение установлено!', 'success');
                 } else if (user.peerConnection.connectionState === 'failed') {
                     user.log('❌ P2P соединение не удалось', 'error');
-                } else if (user.peerConnection.connectionState === 'disconnected') {
-                    user.log('🔌 P2P соединение разорвано - сбрасываем в исходное состояние', 'warning');
-                    // Автоматически сбрасываем пользователя при разрыве соединения
-                    resetUser1();
-                    resetUser2();
-                }
+                    } else if (user.peerConnection.connectionState === 'disconnected') {
+                        if (!isResetting) {
+                            user.log('🔌 P2P соединение разорвано - сбрасываем в исходное состояние через onconnectionstatechange', 'warning');
+                            isResetting = true;
+                            // Автоматически сбрасываем пользователя при разрыве соединения
+                            resetUser1();
+                            resetUser2();
+                            globalInitiator = null;
+                            updateAllCallButtons();
+                            isResetting = false;
+                            user.log('✅ Сброс завершен через onconnectionstatechange', 'success');
+                            
+                            // Автоматически перезапускаем пользователей
+                            user1.log('🚀 Автоматический перезапуск user1 через onconnectionstatechange...', 'info');
+                            user2.log('🚀 Автоматический перезапуск user2 через onconnectionstatechange...', 'info');
+                            
+                            // Небольшая задержка перед перезапуском
+                            setTimeout(() => {
+                                startUser(user1, 'user1Id', 'localVideo1');
+                                startUser(user2, 'user2Id', 'localVideo2');
+                            }, 1000);
+                        } else {
+                            user.log('🔌 P2P соединение разорвано - сброс уже выполнен через disconnectCall', 'info');
+                        }
+                    }
             };
         }
         
@@ -945,7 +984,7 @@
                 }
                 
                 // Запускаем polling для проверки disconnect сигналов
-                user.interval = setInterval(() => checkSignals(user), 1000);
+                user.interval = setInterval(() => checkSignals(user), 3000);
                 user.log(`🔄 Запущен polling для disconnect сигналов`, 'info');
                 
                 // Обновляем кнопки после завершения offer/answer обмена
@@ -1101,10 +1140,12 @@
             
             user1.state = 'idle';
             user1.targetUser = null;
+            user1.log(`✅ user1 сброшен в состояние: ${user1.state}`, 'success');
             // globalInitiator НЕ сбрасываем здесь - это делается в disconnectCall
             
-            document.getElementById('startCallBtn1').style.display = 'none';
-            document.getElementById('startCallBtn1').disabled = true;
+            // Показываем кнопку "Позвонить" для сброшенного пользователя
+            document.getElementById('startCallBtn1').style.display = 'inline-block';
+            document.getElementById('startCallBtn1').disabled = false;
             document.getElementById('offerBtn1').style.display = 'none';
             document.getElementById('offerBtn1').disabled = true;
             document.getElementById('p2pBtn1').style.display = 'none';
@@ -1138,10 +1179,12 @@
             
             user2.state = 'idle';
             user2.targetUser = null;
+            user2.log(`✅ user2 сброшен в состояние: ${user2.state}`, 'success');
             // globalInitiator НЕ сбрасываем здесь - это делается в disconnectCall
             
-            document.getElementById('startCallBtn2').style.display = 'none';
-            document.getElementById('startCallBtn2').disabled = true;
+            // Показываем кнопку "Позвонить" для сброшенного пользователя
+            document.getElementById('startCallBtn2').style.display = 'inline-block';
+            document.getElementById('startCallBtn2').disabled = false;
             document.getElementById('offerBtn2').style.display = 'none';
             document.getElementById('offerBtn2').disabled = true;
             document.getElementById('p2pBtn2').style.display = 'none';
@@ -1157,6 +1200,12 @@
         }
         
         async function disconnectCall() {
+            // Проверяем, не идет ли уже сброс
+            if (isResetting) {
+                user1.log(`⚠️ Сброс уже выполняется`, 'warning');
+                return;
+            }
+            
             // Определяем кто нажал кнопку disconnect
             let caller = null;
             
@@ -1173,12 +1222,21 @@
             }
             
             caller.log(`🔌 Разрываем P2P соединение (${caller.id})`, 'warning');
+            isResetting = true;
             
-            // Закрываем PeerConnection - это автоматически разорвет соединение у обоих пользователей
+            // Закрываем PeerConnection у обоих пользователей
             if (caller.peerConnection) {
                 caller.peerConnection.close();
                 caller.peerConnection = null;
-                caller.log(`🔌 PeerConnection закрыт`, 'info');
+                caller.log(`🔌 PeerConnection закрыт у ${caller.id}`, 'info');
+            }
+            
+            // Закрываем PeerConnection у второго пользователя
+            const otherUser = caller.id === 'user1' ? user2 : user1;
+            if (otherUser.peerConnection) {
+                otherUser.peerConnection.close();
+                otherUser.peerConnection = null;
+                otherUser.log(`🔌 PeerConnection закрыт у ${otherUser.id}`, 'info');
             }
             
             // Очищаем сигналы на сервере для обоих пользователей
@@ -1203,6 +1261,8 @@
             }
             
             // Сбрасываем состояние обоих пользователей
+            user1.log('🔄 Сбрасываем состояние user1 через disconnectCall', 'info');
+            user2.log('🔄 Сбрасываем состояние user2 через disconnectCall', 'info');
             resetUser1();
             resetUser2();
             
@@ -1211,16 +1271,43 @@
             user1.log('🔄 globalInitiator сброшен', 'info');
             user2.log('🔄 globalInitiator сброшен', 'info');
             
+            // Проверяем, что пользователи действительно в состоянии idle
+            user1.log(`✅ user1.state = ${user1.state}`, 'success');
+            user2.log(`✅ user2.state = ${user2.state}`, 'success');
+            
             // Обновляем кнопки для обоих пользователей
             updateAllCallButtons();
+            
+            // Сбрасываем флаг сброса
+            isResetting = false;
+            user1.log('✅ Сброс завершен через disconnectCall', 'success');
+            user2.log('✅ Сброс завершен через disconnectCall', 'success');
+            
+            // Автоматически перезапускаем пользователей
+            user1.log('🚀 Автоматический перезапуск user1...', 'info');
+            user2.log('🚀 Автоматический перезапуск user2...', 'info');
+            
+            // Небольшая задержка перед перезапуском
+            setTimeout(() => {
+                startUser(user1, 'user1Id', 'localVideo1');
+                startUser(user2, 'user2Id', 'localVideo2');
+            }, 1000);
         }
         
         // Функция для сброса состояния обоих пользователей
         function resetBothUsers() {
+            if (isResetting) {
+                user1.log(`⚠️ Сброс уже выполняется`, 'warning');
+                return;
+            }
+            
             user1.log('🔄 Сбрасываем состояние обоих пользователей', 'info');
+            isResetting = true;
             resetUser1();
             resetUser2();
             globalInitiator = null;
+            updateAllCallButtons();
+            isResetting = false;
             user1.log('✅ Состояние обоих пользователей сброшено', 'success');
         }
         
@@ -1253,12 +1340,14 @@
                     activeUser.log('📹 Локальный поток получен и отображен', 'success');
                 }
                 
-                // Добавляем локальные треки к PeerConnection
-                if (activeUser.localStream) {
+                // Проверяем, не добавлены ли уже треки
+                if (activeUser.localStream && activeUser.peerConnection.getSenders().length === 0) {
                     activeUser.localStream.getTracks().forEach(track => {
                         activeUser.peerConnection.addTrack(track, activeUser.localStream);
                     });
                     activeUser.log('📤 Локальные треки добавлены к PeerConnection', 'info');
+                } else {
+                    activeUser.log('📤 Локальные треки уже добавлены к PeerConnection', 'info');
                 }
                 
                 // Создаем offer для P2P соединения
