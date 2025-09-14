@@ -413,11 +413,23 @@
         
         // Функции для конкретных пользователей (для совместимости с кнопками)
         async function testOffer1() {
-            await startWebRTCCall(user1, user2);
+            const targetId = document.getElementById('user1Target').value;
+            if (!targetId) {
+                user1.log('❌ Не указан целевой пользователь', 'error');
+                return;
+            }
+            const target = { id: targetId };
+            await startWebRTCCall(user1, target);
         }
         
         async function testOffer2() {
-            await startWebRTCCall(user2, user1);
+            const targetId = document.getElementById('user2Target').value;
+            if (!targetId) {
+                user2.log('❌ Не указан целевой пользователь', 'error');
+                return;
+            }
+            const target = { id: targetId };
+            await startWebRTCCall(user2, target);
         }
         
         
@@ -448,7 +460,7 @@
                 user2.peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
                         user2.log('🧊 ICE кандидат найден', 'info');
-                        sendSignal(user2, user1.id, 'ice-candidate', event.candidate);
+                        sendSignal(user2, user2.targetUser, 'ice-candidate', event.candidate);
                     }
                 };
                 
@@ -464,7 +476,7 @@
                 user2.log('📥 Answer создан, отправка...', 'info');
                 
                 // Отправляем answer
-                await sendSignal(user2, user1.id, 'answer', answer);
+                await sendSignal(user2, user2.targetUser, 'answer', answer);
                 
                 user2.state = 'calling';
                 user2.log('✅ Answer отправлен, соединение установлено', 'success');
@@ -494,14 +506,14 @@
             }
             
             // Проверяем, что целевой пользователь тоже в состоянии idle
-            const targetUser = targetId === 'user1' ? user1 : user2;
-            if (targetUser.state !== 'idle') {
+            const targetUser = targetId === user1.id ? user1 : (targetId === user2.id ? user2 : null);
+            if (targetUser && targetUser.state !== 'idle') {
                 user.log(`❌ Нельзя начать вызов - целевой пользователь ${targetId} в состоянии: ${targetUser.state}. Сначала сбросьте состояние.`, 'error');
                 return;
             }
             
-            // Проверяем, что целевой пользователь запущен
-            if (!targetUser.id) {
+            // Проверяем, что целевой пользователь запущен (если это локальный пользователь)
+            if (targetUser && !targetUser.id) {
                 user.log(`❌ Нельзя начать вызов - целевой пользователь ${targetId} не запущен. Сначала запустите его.`, 'error');
                 return;
             }
@@ -519,11 +531,8 @@
                 
                 // Шаг 2: Отправляем offer (как кнопка "Начать звонок")
                 user.log(`📤 Шаг 2: Отправляем offer к ${targetId}`, 'info');
-                if (userId === 'user1') {
-                    await testOffer1();
-                } else {
-                    await testOffer2();
-                }
+                const target = { id: targetId };
+                await startWebRTCCall(user, target);
                 
                 // Ждем получения answer от другого пользователя
                 user.log(`⏳ Ожидаем answer от ${targetId}...`, 'info');
@@ -568,7 +577,7 @@
                 
                 const checkAnswer = () => {
                     // Проверяем, что WebRTC соединение установлено (есть remote stream)
-                    const videoId = user.id === 'user1' ? 'remoteVideo1' : 'remoteVideo2';
+                    const videoId = user.id === user1.id ? 'remoteVideo1' : 'remoteVideo2';
                     const remoteVideo = document.getElementById(videoId);
                     
                     if (remoteVideo && remoteVideo.srcObject && user.state === 'calling') {
@@ -778,7 +787,7 @@
                     disconnectBtn.style.display = 'none';
                 } else if (user.state === 'connected') {
                     // После ping-pong показываем кнопку "Начать звонок" только инициатору
-                    if (globalInitiator === 'user1') {
+                    if (globalInitiator === user.id) {
                         startCallBtn.style.display = 'none';
                     offerBtn.style.display = 'inline-block';
                     offerBtn.disabled = false;
@@ -793,7 +802,7 @@
                     }
                 } else if (user.state === 'calling') {
                     // После успешного offer/answer показываем кнопку "Связь" только инициатору
-                    if (globalInitiator === 'user1') {
+                    if (globalInitiator === user.id) {
                         startCallBtn.style.display = 'none';
                         offerBtn.style.display = 'none';
                         p2pBtn.style.display = 'inline-block';
@@ -832,7 +841,7 @@
                     autoAnswerInfo.style.display = 'none';
                 } else if (user.state === 'connected') {
                     // После ping-pong показываем кнопку "Начать звонок" только инициатору
-                    if (globalInitiator === 'user2') {
+                    if (globalInitiator === user.id) {
                         startCallBtn.style.display = 'none';
                     offerBtn.style.display = 'inline-block';
                     offerBtn.disabled = false;
@@ -849,7 +858,7 @@
                     }
                 } else if (user.state === 'calling') {
                     // После успешного offer/answer показываем кнопку "Связь" только инициатору
-                    if (globalInitiator === 'user2') {
+                    if (globalInitiator === user.id) {
                         startCallBtn.style.display = 'none';
                         offerBtn.style.display = 'none';
                         p2pBtn.style.display = 'inline-block';
@@ -905,7 +914,7 @@
             
             user.peerConnection.ontrack = (event) => {
                 user.log('📹 Получен удаленный поток', 'success');
-                const remoteVideo = document.getElementById(`remoteVideo${user.id === 'user1' ? '1' : '2'}`);
+                const remoteVideo = document.getElementById(`remoteVideo${user.id === user1.id ? '1' : '2'}`);
                 remoteVideo.srcObject = event.streams[0];
             };
             
@@ -968,7 +977,7 @@
                     });
                     
                     // Показываем локальное видео
-                    const localVideo = document.getElementById(`localVideo${user.id === 'user1' ? '1' : '2'}`);
+                    const localVideo = document.getElementById(`localVideo${user.id === user1.id ? '1' : '2'}`);
                     localVideo.srcObject = user.localStream;
                     
                     user.log('📹 Локальный поток получен и отображен', 'success');
@@ -1085,8 +1094,8 @@
                 }
                 
                 // Очищаем видео элементы
-                const localVideo = document.getElementById(`localVideo${user.id === 'user1' ? '1' : '2'}`);
-                const remoteVideo = document.getElementById(`remoteVideo${user.id === 'user1' ? '1' : '2'}`);
+                const localVideo = document.getElementById(`localVideo${user.id === user1.id ? '1' : '2'}`);
+                const remoteVideo = document.getElementById(`remoteVideo${user.id === user1.id ? '1' : '2'}`);
                 localVideo.srcObject = null;
                 remoteVideo.srcObject = null;
                 
@@ -1296,14 +1305,14 @@
                 
             try {
                 // Очищаем сигналы для user1
-                const response1 = await fetch(`${SIGNALING_SERVER}?action=delete&userId=user1`);
+                const response1 = await fetch(`${SIGNALING_SERVER}?action=delete&userId=${user1.id}`);
                 const result1 = await response1.json();
-                user1.log(`📡 Очистка user1: ${JSON.stringify(result1)}`, 'info');
+                user1.log(`📡 Очистка ${user1.id}: ${JSON.stringify(result1)}`, 'info');
                 
                 // Очищаем сигналы для user2
-                const response2 = await fetch(`${SIGNALING_SERVER}?action=delete&userId=user2`);
+                const response2 = await fetch(`${SIGNALING_SERVER}?action=delete&userId=${user2.id}`);
                 const result2 = await response2.json();
-                user2.log(`📡 Очистка user2: ${JSON.stringify(result2)}`, 'info');
+                user2.log(`📡 Очистка ${user2.id}: ${JSON.stringify(result2)}`, 'info');
                 
                 user1.log('✅ Все сигналы очищены на сервере', 'success');
                 user2.log('✅ Все сигналы очищены на сервере', 'success');
@@ -1367,7 +1376,7 @@
         async function startP2PCall() {
             try {
                 // Определяем активного пользователя (инициатора)
-                const activeUser = globalInitiator === 'user1' ? user1 : user2;
+                const activeUser = globalInitiator === user1.id ? user1 : user2;
                 const targetUser = { id: activeUser.targetUser };
                 
                 activeUser.log('📞 Активация P2P соединения...', 'info');
@@ -1386,7 +1395,7 @@
                     });
                     
                     // Показываем локальное видео
-                    const localVideo = document.getElementById(`localVideo${activeUser.id === 'user1' ? '1' : '2'}`);
+                    const localVideo = document.getElementById(`localVideo${activeUser.id === user1.id ? '1' : '2'}`);
                     localVideo.srcObject = activeUser.localStream;
                     
                     activeUser.log('📹 Локальный поток получен и отображен', 'success');
