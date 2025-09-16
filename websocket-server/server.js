@@ -6,23 +6,10 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
-const mysql = require('mysql2/promise');
-const bcrypt = require('bcrypt');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const WSS_PORT = process.env.WSS_PORT || 8080;
-
-// MySQL подключение
-const dbConfig = {
-    host: 'localhost',
-    user: 'lizaapp_1w1d2sd3268',
-    password: 'aM1oX3yE0j',
-    database: 'lizaapp_dsfg12df1121q5sd2694',
-    port: 3306
-};
-
-let db;
 
 // Middleware
 app.use(cors({
@@ -72,39 +59,6 @@ const connectedUsers = new Map();
 const signals = new Map(); // userId -> [signals]
 const userRooms = new Map();
 
-// Функция инициализации базы данных
-async function initDatabase() {
-    try {
-        db = await mysql.createConnection(dbConfig);
-        console.log('✅ Подключение к MySQL установлено');
-        
-        // Создаем таблицы если их нет
-        await db.execute(`
-            CREATE TABLE IF NOT EXISTS users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                login VARCHAR(50) UNIQUE NOT NULL,
-                password VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-        `);
-        
-        await db.execute(`
-            CREATE TABLE IF NOT EXISTS active_sessions (
-                user_id INT NOT NULL,
-                session_token VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )
-        `);
-        
-        console.log('✅ Таблицы users и active_sessions готовы');
-    } catch (error) {
-        console.error('❌ Ошибка подключения к MySQL:', error);
-        process.exit(1);
-    }
-}
-
 // Логирование
 function log(message, type = 'info') {
     const timestamp = new Date().toISOString();
@@ -136,100 +90,6 @@ function saveSignal(from, to, type, data) {
     }
     
     log(`Сигнал сохранен: ${type} от ${from} к ${to}`, 'info');
-}
-
-// Функция для регистрации пользователя
-async function registerUser(login, password) {
-    try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const [result] = await db.execute(
-            'INSERT INTO users (login, password) VALUES (?, ?)',
-            [login, hashedPassword]
-        );
-        log(`Пользователь зарегистрирован: ${login} (ID: ${result.insertId})`, 'info');
-        return { success: true, userId: result.insertId };
-    } catch (error) {
-        if (error.code === 'ER_DUP_ENTRY') {
-            log(`Пользователь уже существует: ${login}`, 'warning');
-            return { success: false, error: 'Пользователь уже существует' };
-        }
-        log(`Ошибка регистрации пользователя: ${error.message}`, 'error');
-        return { success: false, error: 'Ошибка регистрации' };
-    }
-}
-
-// Функция для авторизации пользователя
-async function loginUser(login, password) {
-    try {
-        const [rows] = await db.execute('SELECT id, password FROM users WHERE login = ?', [login]);
-        
-        if (rows.length === 0) {
-            return { success: false, error: 'Пользователь не найден' };
-        }
-        
-        const user = rows[0];
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        
-        if (!isValidPassword) {
-            return { success: false, error: 'Неверный пароль' };
-        }
-        
-        // Создаем сессию
-        const sessionToken = uuidv4();
-        await db.execute(
-            'INSERT INTO active_sessions (user_id, session_token) VALUES (?, ?)',
-            [user.id, sessionToken]
-        );
-        
-        log(`Пользователь авторизован: ${login} (ID: ${user.id})`, 'info');
-        return { success: true, userId: user.id, sessionToken };
-    } catch (error) {
-        log(`Ошибка авторизации пользователя: ${error.message}`, 'error');
-        return { success: false, error: 'Ошибка авторизации' };
-    }
-}
-
-// Функция для получения всех пользователей
-async function getAllUsers() {
-    try {
-        const [rows] = await db.execute('SELECT id, login FROM users ORDER BY login');
-        log(`Получено пользователей из MySQL: ${rows.length}`, 'info');
-        return rows;
-    } catch (error) {
-        log(`Ошибка получения пользователей из MySQL: ${error.message}`, 'error');
-        return [];
-    }
-}
-
-// Функция для проверки активной сессии
-async function validateSession(sessionToken) {
-    try {
-        const [rows] = await db.execute(
-            'SELECT u.id, u.login FROM users u JOIN active_sessions s ON u.id = s.user_id WHERE s.session_token = ?',
-            [sessionToken]
-        );
-        
-        if (rows.length === 0) {
-            return { success: false, error: 'Недействительная сессия' };
-        }
-        
-        return { success: true, user: rows[0] };
-    } catch (error) {
-        log(`Ошибка проверки сессии: ${error.message}`, 'error');
-        return { success: false, error: 'Ошибка проверки сессии' };
-    }
-}
-
-// Функция для выхода из системы
-async function logoutUser(sessionToken) {
-    try {
-        await db.execute('DELETE FROM active_sessions WHERE session_token = ?', [sessionToken]);
-        log(`Пользователь вышел из системы: ${sessionToken}`, 'info');
-        return { success: true };
-    } catch (error) {
-        log(`Ошибка выхода из системы: ${error.message}`, 'error');
-        return { success: false, error: 'Ошибка выхода' };
-    }
 }
 
 // Обработка WebSocket соединений
@@ -533,16 +393,6 @@ app.get('/api/signaling', (req, res) => {
         signals.delete(userId);
         log(`Все сигналы удалены для пользователя ${userId}`, 'info');
         res.json({ success: true, message: 'Сигналы удалены' });
-    } else if (action === 'getUsers') {
-        // Получение списка пользователей из MySQL
-        getAllUsers().then(users => {
-            res.json({
-                success: true,
-                users: users.map(user => user.id)
-            });
-        }).catch(error => {
-            res.status(500).json({ success: false, error: 'Ошибка получения пользователей' });
-        });
     } else {
         res.json({ success: false, message: 'Неверные параметры запроса' });
     }
@@ -555,66 +405,10 @@ app.post('/api/signaling', (req, res) => {
     log(`HTTP сигналинг: ${action} от ${from} к ${to}`, 'info');
     
     switch (action) {
-        case 'register':
-            // Регистрируем пользователя
-            const { login, password } = data;
-            if (!login || !password) {
-                return res.status(400).json({ success: false, error: 'Логин и пароль обязательны' });
-            }
-            
-            registerUser(login, password).then(result => {
-                if (result.success) {
-                    res.json({ success: true, message: 'Пользователь зарегистрирован', userId: result.userId });
-                } else {
-                    res.status(400).json({ success: false, error: result.error });
-                }
-            }).catch(error => {
-                res.status(500).json({ success: false, error: 'Ошибка регистрации пользователя' });
-            });
-            break;
-            
-        case 'login':
-            // Авторизация пользователя
-            const { login: loginData, password: passwordData } = data;
-            if (!loginData || !passwordData) {
-                return res.status(400).json({ success: false, error: 'Логин и пароль обязательны' });
-            }
-            
-            loginUser(loginData, passwordData).then(result => {
-                if (result.success) {
-                    res.json({ 
-                        success: true, 
-                        message: 'Авторизация успешна', 
-                        userId: result.userId, 
-                        sessionToken: result.sessionToken 
-                    });
-                } else {
-                    res.status(401).json({ success: false, error: result.error });
-                }
-            }).catch(error => {
-                res.status(500).json({ success: false, error: 'Ошибка авторизации' });
-            });
-            break;
-            
         case 'ping':
-            try {
-                // Сохраняем ping сигнал
-                log(`Сохраняем ping от ${from} к ${to}`, 'info');
-                saveSignal(from, to, 'ping', data);
-                
-                // Автоматически отправляем pong обратно
-                log(`Сохраняем pong от ${to} к ${from}`, 'info');
-                saveSignal(to, from, 'pong', { 
-                    timestamp: Date.now(),
-                    originalPing: data 
-                });
-                
-                log(`Ping от ${from} к ${to} - автоматически отправлен pong`, 'info');
-                res.json({ success: true, message: 'Ping обработан, pong отправлен' });
-            } catch (error) {
-                log(`Ошибка при обработке ping: ${error.message}`, 'error');
-                res.json({ success: false, message: 'Ошибка обработки ping' });
-            }
+            // Сохраняем ping сигнал
+            saveSignal(from, to, 'ping', data);
+            res.json({ success: true, message: 'Ping обработан' });
             break;
             
         case 'signal':
@@ -628,110 +422,23 @@ app.post('/api/signaling', (req, res) => {
     }
 });
 
-// API для управления пользователями
-app.get('/api/users', async (req, res) => {
-    try {
-        const users = await getAllUsers();
-        res.json({
-            success: true,
-            users: users
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Ошибка получения пользователей' });
-    }
-});
-
-// API для регистрации
-app.post('/api/register', async (req, res) => {
-    try {
-        const { login, password } = req.body;
-        if (!login || !password) {
-            return res.status(400).json({ success: false, error: 'Логин и пароль обязательны' });
-        }
-        
-        const result = await registerUser(login, password);
-        if (result.success) {
-            res.json({ success: true, message: 'Пользователь зарегистрирован', userId: result.userId });
-        } else {
-            res.status(400).json({ success: false, error: result.error });
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Ошибка регистрации пользователя' });
-    }
-});
-
-// API для авторизации
-app.post('/api/login', async (req, res) => {
-    try {
-        const { login, password } = req.body;
-        if (!login || !password) {
-            return res.status(400).json({ success: false, error: 'Логин и пароль обязательны' });
-        }
-        
-        const result = await loginUser(login, password);
-        if (result.success) {
-            res.json({ 
-                success: true, 
-                message: 'Авторизация успешна', 
-                userId: result.userId, 
-                sessionToken: result.sessionToken 
-            });
-        } else {
-            res.status(401).json({ success: false, error: result.error });
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Ошибка авторизации' });
-    }
-});
-
-// API для выхода
-app.post('/api/logout', async (req, res) => {
-    try {
-        const { sessionToken } = req.body;
-        if (!sessionToken) {
-            return res.status(400).json({ success: false, error: 'Токен сессии обязателен' });
-        }
-        
-        const result = await logoutUser(sessionToken);
-        if (result.success) {
-            res.json({ success: true, message: 'Выход выполнен' });
-        } else {
-            res.status(400).json({ success: false, error: result.error });
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Ошибка выхода' });
-    }
-});
-
 // Запуск сервера
-async function startServer() {
-    try {
-        // Инициализируем базу данных
-        await initDatabase();
-        
-        if (httpsOptions && httpsServer) {
-            // HTTPS режим
-            httpsServer.listen(PORT, () => {
-                log(`HTTPS сервер запущен на порту ${PORT}`, 'success');
-                log(`WSS сервер запущен на порту ${WSS_PORT}`, 'success');
-                log(`Статистика доступна по адресу: https://lizamsg.ru:${PORT}/api/stats`, 'info');
-                log(`WebSocket доступен по адресу: wss://lizamsg.ru:${WSS_PORT}`, 'info');
-            });
-        } else {
-            // HTTP режим (fallback)
-            app.listen(PORT, () => {
-                log(`HTTP сервер запущен на порту ${PORT}`, 'success');
-                log(`WebSocket сервер запущен на порту ${WSS_PORT}`, 'success');
-                log(`Статистика доступна по адресу: http://localhost:${PORT}/api/stats`, 'info');
-            });
-        }
-    } catch (error) {
-        log(`Ошибка запуска сервера: ${error.message}`, 'error');
-        process.exit(1);
-    }
+if (httpsOptions && httpsServer) {
+    // HTTPS режим
+    httpsServer.listen(PORT, () => {
+        log(`HTTPS сервер запущен на порту ${PORT}`, 'success');
+        log(`WSS сервер запущен на порту ${WSS_PORT}`, 'success');
+        log(`Статистика доступна по адресу: https://lizamsg.ru:${PORT}/api/stats`, 'info');
+        log(`WebSocket доступен по адресу: wss://lizamsg.ru:${WSS_PORT}`, 'info');
+    });
+} else {
+    // HTTP режим (fallback)
+    app.listen(PORT, () => {
+        log(`HTTP сервер запущен на порту ${PORT}`, 'success');
+        log(`WebSocket сервер запущен на порту ${WSS_PORT}`, 'success');
+        log(`Статистика доступна по адресу: http://localhost:${PORT}/api/stats`, 'info');
+    });
 }
-
-startServer();
 
 // Graceful shutdown
 process.on('SIGINT', () => {
