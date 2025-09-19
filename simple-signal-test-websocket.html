@@ -72,6 +72,18 @@
             <div id="log" class="log"></div>
         </div>
             
+        <!-- Окно входящего звонка -->
+        <div id="incomingCallModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+            <div style="background: white; padding: 30px; border-radius: 15px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+                <h2 style="color: #333; margin-bottom: 20px;">📞 Входящий звонок</h2>
+                <p style="font-size: 18px; margin-bottom: 30px;">Вам звонит: <strong id="callerName"></strong></p>
+                <div style="display: flex; gap: 20px; justify-content: center;">
+                    <button onclick="acceptIncomingCall()" style="background: #4CAF50; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 16px; cursor: pointer;">✅ Принять</button>
+                    <button onclick="rejectIncomingCall()" style="background: #f44336; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 16px; cursor: pointer;">❌ Отклонить</button>
+                </div>
+                </div>
+            </div>
+            
         <!-- Система друзей -->
         <div class="user-section" id="friendsSection" style="display: none;">
             <h2>👥 Система друзей</h2>
@@ -82,7 +94,7 @@
                 <input type="text" id="searchUsername" placeholder="Введите логин пользователя" style="width: 300px;">
                 <button onclick="searchUser()" class="btn-primary">🔍 Найти</button>
                 <div id="searchResults" class="search-results"></div>
-                </div>
+        </div>
             
             <!-- Списки -->
             <div style="display: flex; gap: 20px; flex-wrap: wrap;">
@@ -92,7 +104,7 @@
                     <div id="friendsList" class="friends-list">
                         <p style="color: #666; text-align: center; margin: 20px 0;">Нет друзей</p>
                 </div>
-            </div>
+        </div>
             
                 <!-- Запросы в друзья -->
                 <div style="flex: 1; min-width: 250px;">
@@ -100,7 +112,7 @@
                     <div id="requestsList" class="requests-list">
                         <p style="color: #666; text-align: center; margin: 20px 0;">Нет запросов</p>
         </div>
-        </div>
+            </div>
             
                 <!-- Отправленные приглашения -->
                 <div style="flex: 1; min-width: 250px;">
@@ -110,7 +122,7 @@
                 </div>
         </div>
         </div>
-            </div>
+        </div>
         
         <div class="user-section">
             <h2>📋 Логи</h2>
@@ -367,27 +379,13 @@
                         return;
                     }
                     
-            try {
-                // Получаем медиа потоки
-                currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
-                
-                document.getElementById('localVideo').srcObject = currentUser.localStream;
-                currentUser.log('✅ Медиа потоки получены', 'success');
-                
-                // WebSocket уже подключен, polling не нужен
-                
-                // Обновляем UI
-                updateUI();
-                
-                // Показываем систему друзей
-                showFriendsSection();
-                
-            } catch (error) {
-                currentUser.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
-            }
+            // Обновляем UI
+            updateUI();
+            
+            // Показываем систему друзей
+            showFriendsSection();
+            
+            currentUser.log(`📹 Камера и микрофон будут запущены при звонке`, 'info');
         }
         
         
@@ -468,26 +466,46 @@
         
         
         // Обработка ping
-        function handlePing(signal) {
+        async function handlePing(signal) {
             if (currentUser.state !== 'idle') {
                 currentUser.log(`⚠️ Игнорируем ping от ${signal.from} - состояние: ${currentUser.state}`, 'warning');
-                    return;
-                }
+                return;
+            }
                 
-            currentUser.log(`🏓 Получен ping от ${signal.from} - отправляем pong`, 'info');
-            currentUser.state = 'connecting';
-            currentUser.targetUser = signal.from;
-            currentUser.isInitiator = false;
-            currentUser.webrtcInitiated = false;
-            updateUI();
+            currentUser.log(`🏓 Получен ping от ${signal.from}`, 'info');
             
-            // Отправляем pong через WebSocket
-            sendWebSocketMessage('pong', { received: true }, signal.from);
-            currentUser.state = 'connected';
-            updateUI();
+            // Показываем окно входящего звонка
+            incomingCall.isActive = true;
+            incomingCall.caller = signal.from;
+            incomingCall.offer = null; // offer еще не получен
+            incomingCall.iceCandidates = [];
             
-            // Принимающий звонок НЕ инициирует WebRTC - ждет offer от инициатора
-            currentUser.log(`⏳ Ждем offer от ${signal.from}...`, 'info');
+            document.getElementById('callerName').textContent = signal.from;
+            document.getElementById('incomingCallModal').style.display = 'flex';
+            
+            currentUser.log(`📞 Входящий звонок от ${signal.from}`, 'info');
+            
+            // Запускаем медиа потоки сразу при получении ping
+            try {
+                currentUser.log(`📹 Запуск камеры и микрофона для входящего звонка...`, 'info');
+                currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+                
+                document.getElementById('localVideo').srcObject = currentUser.localStream;
+                currentUser.log(`✅ Медиа потоки получены: ${currentUser.localStream.getTracks().length} треков`, 'success');
+                
+                // Логируем детали треков
+                currentUser.localStream.getTracks().forEach(track => {
+                    currentUser.log(`📹 Трек: ${track.kind}, enabled: ${track.enabled}, readyState: ${track.readyState}`, 'info');
+                });
+                
+            } catch (error) {
+                currentUser.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
+                // Скрываем окно входящего звонка при ошибке
+                hideIncomingCallModal();
+            }
         }
         
         // Обработка pong
@@ -509,6 +527,7 @@
         // Инициация WebRTC соединения
         async function initiateWebRTC() {
             if (currentUser.state !== 'connected' || currentUser.webrtcInitiated) {
+                currentUser.log(`⚠️ Не можем инициировать WebRTC - состояние: ${currentUser.state}, initiated: ${currentUser.webrtcInitiated}`, 'warning');
                 return;
             }
             
@@ -523,7 +542,11 @@
                 if (currentUser.localStream) {
                     currentUser.localStream.getTracks().forEach(track => {
                         currentUser.peerConnection.addTrack(track, currentUser.localStream);
+                        currentUser.log(`📹 Добавлен трек: ${track.kind}`, 'info');
                     });
+                    currentUser.log(`📹 Добавлено ${currentUser.localStream.getTracks().length} треков в PeerConnection`, 'success');
+                } else {
+                    currentUser.log(`❌ Нет локального потока для добавления в PeerConnection`, 'error');
                 }
                 
                 // Обработчики событий
@@ -535,6 +558,8 @@
                 
                 currentUser.peerConnection.ontrack = (event) => {
                     currentUser.log('📹 Получен удаленный поток', 'success');
+                    currentUser.log(`📹 Количество потоков: ${event.streams.length}`, 'info');
+                    currentUser.log(`📹 Количество треков: ${event.track.kind}`, 'info');
                     document.getElementById('remoteVideo').srcObject = event.streams[0];
                 };
                 
@@ -561,33 +586,41 @@
         
         // Обработка offer
         async function handleOffer(signal) {
-            if (currentUser.state !== 'connected') {
-                currentUser.log(`⚠️ Игнорируем offer - состояние: ${currentUser.state}`, 'warning');
+            if (currentUser.state !== 'connecting' || currentUser.targetUser !== signal.from) {
+                currentUser.log(`⚠️ Игнорируем offer - состояние: ${currentUser.state}, target: ${currentUser.targetUser}`, 'warning');
                 return;
             }
 
             currentUser.log(`📥 Получен offer от ${signal.from}`, 'info');
+            
+            // Проверяем наличие медиа потоков
+            if (!currentUser.localStream) {
+                currentUser.log(`❌ Нет локального потока для добавления в PeerConnection (получатель)`, 'error');
+                return;
+            }
             
             try {
                 // Создаем PeerConnection
                 currentUser.peerConnection = new RTCPeerConnection(rtcConfig);
                 
                 // Добавляем локальный поток
-                if (currentUser.localStream) {
-                    currentUser.localStream.getTracks().forEach(track => {
-                        currentUser.peerConnection.addTrack(track, currentUser.localStream);
-                    });
-                }
+                currentUser.localStream.getTracks().forEach(track => {
+                    currentUser.peerConnection.addTrack(track, currentUser.localStream);
+                    currentUser.log(`📹 Добавлен трек: ${track.kind} (получатель)`, 'info');
+                });
+                currentUser.log(`📹 Добавлено ${currentUser.localStream.getTracks().length} треков в PeerConnection (получатель)`, 'success');
                 
                 // Обработчики событий
                 currentUser.peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
+                    if (event.candidate) {
                         sendSignal('ice-candidate', event.candidate);
                     }
                 };
                 
                 currentUser.peerConnection.ontrack = (event) => {
-                    currentUser.log('📹 Получен удаленный поток', 'success');
+                    currentUser.log('📹 Получен удаленный поток (получатель)', 'success');
+                    currentUser.log(`📹 Количество потоков: ${event.streams.length} (получатель)`, 'info');
+                    currentUser.log(`📹 Количество треков: ${event.track.kind} (получатель)`, 'info');
                     document.getElementById('remoteVideo').srcObject = event.streams[0];
                 };
                 
@@ -610,9 +643,6 @@
                 await sendSignal('answer', answer);
                 currentUser.log('✅ Answer отправлен', 'success');
                 
-                // Устанавливаем targetUser для получателя
-                currentUser.targetUser = signal.from;
-                
                 // Показываем кнопку "Завершить" у получателя
                 const disconnectBtn = document.getElementById(`disconnectBtn_${signal.from}`);
                 const callBtn = document.getElementById(`callBtn_${signal.from}`);
@@ -620,8 +650,67 @@
                 if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
                 if (callBtn) callBtn.style.display = 'none';
                 
-                                } catch (error) {
+            } catch (error) {
                 currentUser.log(`❌ Ошибка обработки offer: ${error.message}`, 'error');
+            }
+        }
+        
+        // Принятие входящего звонка
+        async function acceptIncomingCall() {
+            if (!incomingCall.isActive) return;
+            
+            currentUser.log(`✅ Принимаем звонок от ${incomingCall.caller}`, 'success');
+            
+            // Отправляем pong для подтверждения принятия звонка
+            sendWebSocketMessage('pong', { received: true }, incomingCall.caller);
+            currentUser.log('✅ pong отправлен', 'success');
+            
+            // Устанавливаем состояние
+            currentUser.state = 'connecting';
+            currentUser.targetUser = incomingCall.caller;
+            currentUser.isInitiator = false;
+            currentUser.webrtcInitiated = false;
+            updateUI();
+            
+            // Скрываем окно входящего звонка
+            hideIncomingCallModal();
+            
+            currentUser.log(`⏳ Ждем offer от ${incomingCall.caller}...`, 'info');
+        }
+        
+        // Отклонение входящего звонка
+        async function rejectIncomingCall() {
+            if (!incomingCall.isActive) return;
+            
+            currentUser.log(`❌ Отклоняем звонок от ${incomingCall.caller}`, 'warning');
+            
+            // Останавливаем медиа потоки
+            if (currentUser.localStream) {
+                currentUser.localStream.getTracks().forEach(track => track.stop());
+                currentUser.localStream = null;
+                document.getElementById('localVideo').srcObject = null;
+                currentUser.log('📹 Медиа потоки остановлены', 'info');
+            }
+            
+            // Отправляем disconnect сигнал конкретно инициатору звонка
+            sendWebSocketMessage('disconnect', { reason: 'call_rejected' }, incomingCall.caller);
+            
+            // Скрываем окно входящего звонка
+            hideIncomingCallModal();
+        }
+        
+        // Скрытие окна входящего звонка
+        function hideIncomingCallModal() {
+            document.getElementById('incomingCallModal').style.display = 'none';
+            incomingCall.isActive = false;
+            incomingCall.caller = null;
+            incomingCall.offer = null;
+            incomingCall.iceCandidates = [];
+            
+            // Очищаем таймаут если есть
+            if (incomingCall.callTimeout) {
+                clearTimeout(incomingCall.callTimeout);
+                incomingCall.callTimeout = null;
             }
         }
         
@@ -631,7 +720,7 @@
                 currentUser.log(`⚠️ Игнорируем answer - состояние: ${currentUser.state}`, 'warning');
                 return;
             }
-            
+
             currentUser.log(`📥 Получен answer от ${signal.from}`, 'info');
             
             try {
@@ -660,9 +749,11 @@
                 try {
                     await currentUser.peerConnection.addIceCandidate(signal.data);
                     currentUser.log(`🧊 ICE кандидат добавлен от ${signal.from}`, 'info');
-            } catch (error) {
+                } catch (error) {
                     currentUser.log(`❌ Ошибка добавления ICE кандидата: ${error.message}`, 'error');
                 }
+            } else {
+                currentUser.log(`⚠️ PeerConnection не создан, игнорируем ICE кандидат`, 'warning');
             }
         }
         
@@ -670,13 +761,28 @@
         async function handleDisconnect(signal) {
             currentUser.log(`📥 Получен disconnect от ${signal.from}`, 'warning');
             
-            if (currentUser.targetUser === signal.from) {
-                currentUser.log(`🔌 Соединение разорвано`, 'warning');
+            // Проверяем, что это от целевого пользователя или от того, кто звонил
+            if (currentUser.targetUser === signal.from || (incomingCall.isActive && incomingCall.caller === signal.from)) {
+                
+                // Если это отклонение звонка на ранней стадии
+                if (signal.data && signal.data.reason === 'call_rejected') {
+                    currentUser.log(`❌ Звонок отклонен пользователем ${signal.from}`, 'warning');
+                } else {
+                    currentUser.log(`🔌 Соединение разорвано`, 'warning');
+                }
                 
                 // Завершаем только звонок, не сбрасываем пользователя
                 if (currentUser.peerConnection) {
                     currentUser.peerConnection.close();
                     currentUser.peerConnection = null;
+                }
+                
+                // Останавливаем медиа потоки
+                if (currentUser.localStream) {
+                    currentUser.localStream.getTracks().forEach(track => track.stop());
+                    currentUser.localStream = null;
+                    document.getElementById('localVideo').srcObject = null;
+                    currentUser.log('📹 Медиа потоки остановлены', 'info');
                 }
                 
                 // Восстанавливаем кнопки друзей
@@ -689,6 +795,11 @@
                 currentUser.webrtcInitiated = false;
                 
                 document.getElementById('remoteVideo').srcObject = null;
+                
+                // Скрываем окно входящего звонка если оно открыто
+                if (incomingCall.isActive) {
+                    hideIncomingCallModal();
+                }
                 
                 updateUI();
             }
@@ -712,6 +823,14 @@
             // Отправляем disconnect сигнал
             if (currentUser.targetUser) {
                 await sendSignal('disconnect', { reason: 'user_disconnected' });
+            }
+            
+            // Останавливаем медиа потоки
+            if (currentUser.localStream) {
+                currentUser.localStream.getTracks().forEach(track => track.stop());
+                currentUser.localStream = null;
+                document.getElementById('localVideo').srcObject = null;
+                currentUser.log('📹 Медиа потоки остановлены', 'info');
             }
             
             // Восстанавливаем кнопки друзей
@@ -740,6 +859,14 @@
             // Отправляем disconnect сигнал
             if (currentUser.targetUser) {
                 await sendSignal('disconnect', { reason: 'user_disconnected' });
+            }
+            
+            // Останавливаем медиа потоки
+            if (currentUser.localStream) {
+                currentUser.localStream.getTracks().forEach(track => track.stop());
+                currentUser.localStream = null;
+                document.getElementById('localVideo').srcObject = null;
+                currentUser.log('📹 Медиа потоки остановлены', 'info');
             }
             
             // Восстанавливаем кнопки друзей
@@ -815,6 +942,16 @@
             friends: [],           // Список друзей
             requests: [],          // Входящие запросы
             sentRequests: []       // Исходящие запросы
+        };
+        
+        // Состояние входящего звонка
+        let incomingCall = {
+            isActive: false,
+            caller: null,
+            offer: null,
+            iceCandidates: [],  // Буфер для ICE кандидатов
+            maxIceCandidates: 10,  // Максимум ICE кандидатов в буфере
+            callTimeout: null  // Таймаут для автоматического отклонения
         };
         
         // Показать секцию друзей после авторизации
@@ -1136,7 +1273,7 @@
         }
         
         // Звонок другу
-        function callFriend(username) {
+        async function callFriend(username) {
             currentUser.log(`📞 Звонок другу: ${username}`, 'info');
             
             // Скрываем кнопку "Видеозвонок" и показываем "Завершить"
@@ -1146,9 +1283,33 @@
             if (callBtn) callBtn.style.display = 'none';
             if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
             
-            // Используем существующий функционал звонков
-            document.getElementById('targetUserId').value = username;
-            startCall();
+            // Запускаем медиа потоки у инициатора
+            try {
+                currentUser.log(`📹 Запуск камеры и микрофона...`, 'info');
+                currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+                
+                document.getElementById('localVideo').srcObject = currentUser.localStream;
+                currentUser.log(`✅ Медиа потоки получены: ${currentUser.localStream.getTracks().length} треков (инициатор)`, 'success');
+                
+                // Логируем детали треков
+                currentUser.localStream.getTracks().forEach(track => {
+                    currentUser.log(`📹 Трек: ${track.kind}, enabled: ${track.enabled}, readyState: ${track.readyState} (инициатор)`, 'info');
+                });
+                
+                // Используем существующий функционал звонков
+                document.getElementById('targetUserId').value = username;
+                startCall();
+                
+                } catch (error) {
+                currentUser.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
+                
+                // Восстанавливаем кнопки при ошибке
+                if (callBtn) callBtn.style.display = 'inline-block';
+                if (disconnectBtn) disconnectBtn.style.display = 'none';
+            }
         }
         
         // Восстановление кнопок друзей после завершения звонка
@@ -1210,27 +1371,15 @@
                 return;
             }
             
-            try {
-                // Получаем медиа потоки
-                currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
-                
-                document.getElementById('localVideo').srcObject = currentUser.localStream;
-                currentUser.log('✅ Медиа потоки получены', 'success');
-                
-                // Обновляем UI
-                updateUI();
-                
-                // Показываем систему друзей
-                showFriendsSection();
-                
-                currentUser.log(`🚀 Пользователь ${currentUser.id} готов к звонкам`, 'success');
-                
-            } catch (error) {
-                currentUser.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
-            }
+            // Обновляем UI
+            updateUI();
+            
+            // Показываем систему друзей
+            showFriendsSection();
+            
+            currentUser.log(`📹 Камера и микрофон будут запущены при звонке`, 'info');
+            
+            currentUser.log(`🚀 Пользователь ${currentUser.id} готов к звонкам`, 'success');
         }
         
         // Инициализация при загрузке страницы
