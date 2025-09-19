@@ -19,7 +19,7 @@ try {
     }
     
     // Получаем принятые контакты
-    $query = "SELECT c.*, u.phone 
+    $query = "SELECT c.*, u.username 
               FROM contacts c 
               JOIN users u ON c.contact_id = u.id 
               WHERE c.user_id = :user_id AND c.status = 'accepted'";

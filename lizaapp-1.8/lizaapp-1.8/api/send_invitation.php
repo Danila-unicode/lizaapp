@@ -17,11 +17,11 @@ if($_SERVER['REQUEST_METHOD'] !== 'POST') {
 require_once '../config/database.php';
 
 $data = json_decode(file_get_contents('php://input'), true);
-$phone = $data['phone'] ?? '';
+$username = $data['target_username'] ?? '';
 
-if(empty($phone)) {
+if(empty($username)) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Номер телефона обязателен']);
+    echo json_encode(['success' => false, 'message' => 'Логин обязателен']);
     exit();
 }
 
@@ -29,10 +29,10 @@ try {
     $db = new Database();
     $conn = $db->getConnection();
     
-    // Найти пользователя по номеру
-    $query = "SELECT id FROM users WHERE phone = :phone";
+    // Найти пользователя по логину
+    $query = "SELECT id FROM users WHERE username = :username";
     $stmt = $conn->prepare($query);
-    $stmt->bindParam(":phone", $phone);
+    $stmt->bindParam(":username", $username);
     $stmt->execute();
     
     if($stmt->rowCount() == 0) {

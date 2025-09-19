@@ -1,57 +1,81 @@
 <?php
 header('Content-Type: application/json');
-session_start();
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-if(!isset($_SESSION['user_id'])) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Не авторизован']);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
+
+if($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Метод не разрешен']);
     exit();
 }
 
-require_once '../config/database.php';
+// Подключение к базе данных
+$host = 'localhost';
+$dbname = 'lizaapp_dsfg12df1121q5sd2694';
+$username = 'lizaapp_1w1d2sd3268';
+$password = 'aM1oX3yE0j';
+
+try {
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Ошибка подключения к базе данных']);
+    exit;
+}
 
 $data = json_decode(file_get_contents('php://input'), true);
-$contact_id = $data['contact_id'] ?? null;
+$rejecterUsername = $data['rejecter_username'] ?? '';
+$senderUsername = $data['sender_username'] ?? '';
 
-if (!$contact_id) {
-    echo json_encode(['success' => false, 'message' => 'ID контакта не указан']);
+if(empty($rejecterUsername) || empty($senderUsername)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Логины обязательны']);
     exit();
 }
 
 try {
-    $db = new Database();
-    $conn = $db->getConnection();
+    // Найти ID отклоняющего
+    $query = "SELECT id FROM users WHERE username = ?";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$rejecterUsername]);
     
-    if (!$conn) {
-        throw new Exception('Ошибка подключения к базе данных');
+    if($stmt->rowCount() == 0) {
+        echo json_encode(['success' => false, 'message' => 'Отклоняющий не найден']);
+        exit();
     }
+    $rejecter = $stmt->fetch(PDO::FETCH_ASSOC);
+    $rejecterId = $rejecter['id'];
     
-    // Обновляем статус запроса на 'rejected'
-    $query = "UPDATE contacts 
-              SET status = 'rejected' 
-              WHERE user_id = :contact_id AND contact_id = :user_id AND status = 'pending'";
+    // Найти ID отправителя
+    $query = "SELECT id FROM users WHERE username = ?";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$senderUsername]);
     
-    $stmt = $conn->prepare($query);
-    $stmt->bindParam(':contact_id', $contact_id);
-    $stmt->bindParam(':user_id', $_SESSION['user_id']);
-    $stmt->execute();
+    if($stmt->rowCount() == 0) {
+        echo json_encode(['success' => false, 'message' => 'Отправитель не найден']);
+        exit();
+    }
+    $sender = $stmt->fetch(PDO::FETCH_ASSOC);
+    $senderId = $sender['id'];
     
-    if ($stmt->rowCount() > 0) {
-        echo json_encode([
-            'success' => true,
-            'message' => 'Запрос отклонен'
-        ]);
+    // Отклонить приглашение
+    $query = "UPDATE contacts SET status = 'rejected' WHERE user_id = ? AND contact_id = ? AND status = 'pending'";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$senderId, $rejecterId]);
+    
+    if($stmt->rowCount() > 0) {
+        echo json_encode(['success' => true, 'message' => 'Запрос отклонен']);
     } else {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Запрос не найден или уже обработан'
-        ]);
+        echo json_encode(['success' => false, 'message' => 'Запрос не найден']);
     }
     
-} catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
-    ]);
+} catch(PDOException $e) {
+    echo json_encode(['success' => false, 'message' => 'Ошибка базы данных: ' . $e->getMessage()]);
 }
 ?>

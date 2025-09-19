@@ -23,9 +23,9 @@ try {
     exit;
 }
 
-$username = $_GET['username'] ?? '';
+$fromUsername = $_GET['username'] ?? '';
 
-if(empty($username)) {
+if(empty($fromUsername)) {
     echo json_encode(['success' => false, 'message' => 'Логин не указан']);
     exit();
 }
@@ -34,7 +34,7 @@ try {
     // Найти ID пользователя
     $query = "SELECT id FROM users WHERE username = ?";
     $stmt = $pdo->prepare($query);
-    $stmt->execute([$username]);
+    $stmt->execute([$fromUsername]);
     
     if($stmt->rowCount() == 0) {
         echo json_encode(['success' => false, 'message' => 'Пользователь не найден']);
@@ -43,11 +43,11 @@ try {
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
     $userId = $user['id'];
     
-    // Получаем входящие запросы (где текущий пользователь - получатель)
-    $query = "SELECT c.*, u.username
-              FROM contacts c
-              JOIN users u ON c.user_id = u.id
-              WHERE c.contact_id = ? AND c.status = 'pending'";
+    // Получаем отправленные запросы
+    $query = "SELECT c.*, u.username 
+              FROM contacts c 
+              JOIN users u ON c.contact_id = u.id 
+              WHERE c.user_id = ? AND c.status = 'pending'";
     
     $stmt = $pdo->prepare($query);
     $stmt->execute([$userId]);

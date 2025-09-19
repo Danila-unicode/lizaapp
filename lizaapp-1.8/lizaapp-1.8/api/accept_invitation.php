@@ -17,17 +17,31 @@ if($_SERVER['REQUEST_METHOD'] !== 'POST') {
 require_once '../config/database.php';
 
 $data = json_decode(file_get_contents('php://input'), true);
-$contactId = $data['contact_id'] ?? 0;
+$senderUsername = $data['sender_username'] ?? '';
 
-if($contactId <= 0) {
+if(empty($senderUsername)) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'ID контакта обязателен']);
+    echo json_encode(['success' => false, 'message' => 'Логин отправителя обязателен']);
     exit();
 }
 
 try {
     $db = new Database();
     $conn = $db->getConnection();
+    
+    // Найти ID отправителя по логину
+    $query = "SELECT id FROM users WHERE username = :username";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(":username", $senderUsername);
+    $stmt->execute();
+    
+    if($stmt->rowCount() == 0) {
+        echo json_encode(['success' => false, 'message' => 'Пользователь не найден']);
+        exit();
+    }
+    
+    $sender = $stmt->fetch(PDO::FETCH_ASSOC);
+    $contactId = $sender['id'];
     
     // Принять приглашение
     $query = "UPDATE contacts SET status = 'accepted' WHERE user_id = :contact_id AND contact_id = :user_id AND status = 'pending'";

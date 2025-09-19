@@ -1,49 +1,45 @@
 <?php
 header('Content-Type: application/json');
-session_start();
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-if(!isset($_SESSION['user_id'])) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Не авторизован']);
-    exit();
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
 }
 
-require_once '../config/database.php';
+// Подключение к базе данных
+$host = 'localhost';
+$dbname = 'lizaapp_dsfg12df1121q5sd2694';
+$username = 'lizaapp_1w1d2sd3268';
+$password = 'aM1oX3yE0j';
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $phone = $input['phone'] ?? '';
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Ошибка подключения к базе данных']);
+    exit;
+}
+
+try {
+    // Получаем username из GET параметра
+    $searchUsername = $_GET['username'] ?? '';
     
-    if(empty($phone)) {
-        echo json_encode(['success' => false, 'message' => 'Номер телефона не указан']);
+    if(empty($searchUsername)) {
+        echo json_encode(['success' => false, 'message' => 'Логин не указан']);
         exit();
     }
     
-    $db = new Database();
-    $conn = $db->getConnection();
-    
-    // Ищем пользователя по номеру телефона
-    $query = "SELECT id, phone FROM users WHERE phone = :phone AND id != :current_user_id";
-    $stmt = $conn->prepare($query);
-    $stmt->bindParam(":phone", $phone);
-    $stmt->bindParam(":current_user_id", $_SESSION['user_id']);
-    $stmt->execute();
+    // Ищем пользователя по логину (username)
+    $query = "SELECT id, username FROM users WHERE username = ? AND is_active = 1";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$searchUsername]);
     
     if($stmt->rowCount() > 0) {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        // Проверяем, не отправляли ли уже приглашение
-        $query = "SELECT id FROM contacts WHERE user_id = :user_id AND contact_id = :contact_id";
-        $stmt = $conn->prepare($query);
-        $stmt->bindParam(":user_id", $_SESSION['user_id']);
-        $stmt->bindParam(":contact_id", $user['id']);
-        $stmt->execute();
-        
-        if($stmt->rowCount() > 0) {
-            echo json_encode(['success' => false, 'message' => 'Приглашение уже отправлено этому пользователю']);
-        } else {
-            echo json_encode(['success' => true, 'user' => $user]);
-        }
+        echo json_encode(['success' => true, 'user' => $user]);
     } else {
         echo json_encode(['success' => false, 'message' => 'Пользователь не найден']);
     }

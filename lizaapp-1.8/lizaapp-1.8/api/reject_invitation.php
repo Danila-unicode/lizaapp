@@ -11,10 +11,10 @@ if(!isset($_SESSION['user_id'])) {
 require_once '../config/database.php';
 
 $data = json_decode(file_get_contents('php://input'), true);
-$contact_id = $data['contact_id'] ?? null;
+$senderUsername = $data['sender_username'] ?? '';
 
-if (!$contact_id) {
-    echo json_encode(['success' => false, 'message' => 'ID контакта не указан']);
+if(empty($senderUsername)) {
+    echo json_encode(['success' => false, 'message' => 'Логин отправителя не указан']);
     exit();
 }
 
@@ -25,6 +25,20 @@ try {
     if (!$conn) {
         throw new Exception('Ошибка подключения к базе данных');
     }
+    
+    // Найти ID отправителя по логину
+    $query = "SELECT id FROM users WHERE username = :username";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(":username", $senderUsername);
+    $stmt->execute();
+    
+    if($stmt->rowCount() == 0) {
+        echo json_encode(['success' => false, 'message' => 'Пользователь не найден']);
+        exit();
+    }
+    
+    $sender = $stmt->fetch(PDO::FETCH_ASSOC);
+    $contact_id = $sender['id'];
     
     // Обновляем статус запроса на 'rejected'
     $query = "UPDATE contacts 

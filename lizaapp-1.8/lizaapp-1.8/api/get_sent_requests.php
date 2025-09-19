@@ -18,11 +18,11 @@ try {
         throw new Exception('Ошибка подключения к базе данных');
     }
     
-    // Получаем входящие запросы (где текущий пользователь - получатель)
+    // Получаем отправленные запросы (где текущий пользователь - отправитель)
     $query = "SELECT c.*, u.username 
               FROM contacts c 
-              JOIN users u ON c.user_id = u.id 
-              WHERE c.contact_id = :user_id AND c.status = 'pending'";
+              JOIN users u ON c.contact_id = u.id 
+              WHERE c.user_id = :user_id AND c.status = 'pending'";
     
     $stmt = $conn->prepare($query);
     $stmt->bindParam(':user_id', $_SESSION['user_id']);

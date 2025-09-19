@@ -11,21 +11,21 @@ if(!isset($_SESSION['user_id'])) {
 require_once '../config/database.php';
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $phone = $input['phone'] ?? '';
+    // Получаем username из GET параметра
+    $username = $_GET['username'] ?? '';
     
-    if(empty($phone)) {
-        echo json_encode(['success' => false, 'message' => 'Номер телефона не указан']);
+    if(empty($username)) {
+        echo json_encode(['success' => false, 'message' => 'Логин не указан']);
         exit();
     }
     
     $db = new Database();
     $conn = $db->getConnection();
     
-    // Ищем пользователя по номеру телефона
-    $query = "SELECT id, phone FROM users WHERE phone = :phone AND id != :current_user_id";
+    // Ищем пользователя по логину (username)
+    $query = "SELECT id, username FROM users WHERE username = :username AND id != :current_user_id";
     $stmt = $conn->prepare($query);
-    $stmt->bindParam(":phone", $phone);
+    $stmt->bindParam(":username", $username);
     $stmt->bindParam(":current_user_id", $_SESSION['user_id']);
     $stmt->execute();
     

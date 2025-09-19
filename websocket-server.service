@@ -1,0 +1,24 @@
+[Unit]
+Description=WebSocket Server for Liza App
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/websocket-server
+ExecStart=/usr/bin/node websocket-server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=websocket-server
+
+# Безопасность
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
