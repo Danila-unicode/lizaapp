@@ -1,0 +1,37 @@
+[33mcommit 1415a189e6b97d79c41ca054286cb6270cf05f43[m[33m ([m[1;33mtag: [m[1;33mv1.8[m[33m)[m
+Author: unico <unicode23@gmail.com>
+Date:   Sat Sep 13 17:37:29 2025 +0300
+
+    v1.8: Звонки с авторизацией и выбором пользователя - поддержка миллионов пользователей
+
+SIMPLE_SIGNAL_AUTH_GUIDE.md
+api/login.php
+api/logout.php
+database_structure.sql
+database_users.sql
+h origin v1.6.0
+"how 41c1fe3\357\200\272simple-signal-test-websocket.html \357\201\274 findstr -i \357\200\242turn\357\201\274iceServers\357\200\242"
+old/INSTALLATION.md
+old/MYSQL_SETUP.md
+old/README_AUTH_SYSTEM.md
+old/UPLOAD_AUTH_SYSTEM.md
+old/auth.html
+old/index.php
+old/logout.php
+old/main.html
+old/mysql_config.sql
+old/register.html
+old/register.php
+old/simple-signal-test-single-user.html
+old/update_database.php
+register.html
+register.php
+reset_password.php
+server_backup.js
+simple-signal-test-websocket.html
+temp_file.html
+ter
+test_server.html
+update_database.php
+websocket-server/package.json
+websocket-server/server.js

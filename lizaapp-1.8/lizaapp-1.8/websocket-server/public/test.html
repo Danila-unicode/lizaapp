@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Signaling Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .user-section { border: 1px solid #ccc; padding: 20px; margin: 10px 0; }
+        .log { background: #f5f5f5; padding: 10px; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        button { padding: 10px 20px; margin: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Signaling Test</h1>
+        
+        <div class="user-section">
+            <h2>User 1</h2>
+            <button onclick="connectUser1()">Подключить User 1</button>
+            <button onclick="sendPing1()" id="pingBtn1" disabled>Отправить ping к user2</button>
+            <button onclick="sendOffer1()" id="offerBtn1" disabled style="display: none;">📤 Тест Offer</button>
+            <button onclick="disconnectUser1()" id="disconnectBtn1" disabled style="display: none;">🔌 Разорвать соединение</button>
+            <div id="log1" class="log"></div>
+        </div>
+        
+        <div class="user-section">
+            <h2>User 2</h2>
+            <button onclick="connectUser2()">Подключить User 2</button>
+            <button onclick="sendPing2()" id="pingBtn2" disabled>Отправить ping к user1</button>
+            <div id="autoAnswerInfo" style="display: none; color: #4CAF50; font-weight: bold;">🤖 Answer отправляется автоматически при получении offer</div>
+            <div id="log2" class="log"></div>
+        </div>
+        
+        <div class="user-section">
+            <h2>Статистика сервера</h2>
+            <button onclick="getStats()">Обновить статистику</button>
+            <div id="stats" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        let user1 = {
+            ws: null,
+            userId: null,
+            state: 'idle',
+            targetUser: null,
+            log: (msg, type = 'info') => {
+                const logEl = document.getElementById('log1');
+                const time = new Date().toLocaleTimeString();
+                const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info';
+                logEl.innerHTML += `<div class="${className}">[${time}] ${msg}</div>`;
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+        };
+        
+        let user2 = {
+            ws: null,
+            userId: null,
+            state: 'idle',
+            targetUser: null,
+            log: (msg, type = 'info') => {
+                const logEl = document.getElementById('log2');
+                const time = new Date().toLocaleTimeString();
+                const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info';
+                logEl.innerHTML += `<div class="${className}">[${time}] ${msg}</div>`;
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+        };
+        
+        function connectUser1() {
+            if (user1.ws) {
+                user1.log('User 1 уже подключен', 'warning');
+                return;
+            }
+            
+            user1.ws = new WebSocket('ws://localhost:8080');
+            
+            user1.ws.onopen = () => {
+                user1.log('User 1 подключен к WebSocket серверу', 'success');
+                document.getElementById('pingBtn1').disabled = false;
+            };
+            
+            user1.ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(user1, message);
+            };
+            
+            user1.ws.onclose = () => {
+                user1.log('User 1 отключен от сервера', 'warning');
+                user1.ws = null;
+                user1.state = 'idle';
+                user1.targetUser = null;
+                updateButtons(user1);
+            };
+            
+            user1.ws.onerror = (error) => {
+                user1.log(`Ошибка WebSocket: ${error.message}`, 'error');
+            };
+        }
+        
+        function connectUser2() {
+            if (user2.ws) {
+                user2.log('User 2 уже подключен', 'warning');
+                return;
+            }
+            
+            user2.ws = new WebSocket('ws://localhost:8080');
+            
+            user2.ws.onopen = () => {
+                user2.log('User 2 подключен к WebSocket серверу', 'success');
+                document.getElementById('pingBtn2').disabled = false;
+            };
+            
+            user2.ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(user2, message);
+            };
+            
+            user2.ws.onclose = () => {
+                user2.log('User 2 отключен от сервера', 'warning');
+                user2.ws = null;
+                user2.state = 'idle';
+                user2.targetUser = null;
+                updateButtons(user2);
+            };
+            
+            user2.ws.onerror = (error) => {
+                user2.log(`Ошибка WebSocket: ${error.message}`, 'error');
+            };
+        }
+        
+        function handleMessage(user, message) {
+            switch (message.type) {
+                case 'connected':
+                    user.userId = message.userId;
+                    user.log(`Получен ID: ${message.userId}`, 'success');
+                    break;
+                    
+                case 'ping':
+                    user.log(`Получен ping от ${message.from}`, 'warning');
+                    if (user.state === 'idle') {
+                        user.state = 'connecting';
+                        user.targetUser = message.from;
+                        user.log(`Состояние изменено на: ${user.state}`, 'info');
+                        sendPong(user, message.from);
+                    }
+                    break;
+                    
+                case 'pong':
+                    user.log(`Получен pong от ${message.from}`, 'success');
+                    if (user.state === 'connecting') {
+                        user.state = 'connected';
+                        user.targetUser = message.from;
+                        user.log(`Соединение установлено с ${message.from}`, 'success');
+                        updateButtons(user);
+                    }
+                    break;
+                    
+                case 'offer':
+                    user.log(`Получен offer от ${message.from}`, 'warning');
+                    if (user.state === 'connected') {
+                        // Автоматически отправляем answer
+                        sendAnswer(user, message.from);
+                    }
+                    break;
+                    
+                case 'answer':
+                    user.log(`Получен answer от ${message.from}`, 'success');
+                    user.log(`Offer/Answer обмен завершен!`, 'success');
+                    break;
+                    
+                case 'disconnect':
+                    user.log(`Получен сигнал disconnect от ${message.from}`, 'warning');
+                    user.state = 'idle';
+                    user.targetUser = null;
+                    user.log(`Соединение разорвано, возврат в исходное состояние`, 'success');
+                    updateButtons(user);
+                    break;
+                    
+                default:
+                    user.log(`Неизвестный тип сообщения: ${message.type}`, 'warning');
+            }
+        }
+        
+        function sendPing1() {
+            if (!user1.ws || user1.state !== 'idle') {
+                user1.log('Невозможно отправить ping', 'warning');
+                return;
+            }
+            
+            user1.state = 'connecting';
+            user1.targetUser = 'user2';
+            user1.log(`Отправка ping к user2`, 'warning');
+            
+            user1.ws.send(JSON.stringify({
+                type: 'ping',
+                to: 'user2',
+                data: { test: true }
+            }));
+        }
+        
+        function sendPing2() {
+            if (!user2.ws || user2.state !== 'idle') {
+                user2.log('Невозможно отправить ping', 'warning');
+                return;
+            }
+            
+            user2.state = 'connecting';
+            user2.targetUser = 'user1';
+            user2.log(`Отправка ping к user1`, 'warning');
+            
+            user2.ws.send(JSON.stringify({
+                type: 'ping',
+                to: 'user1',
+                data: { test: true }
+            }));
+        }
+        
+        function sendPong(user, toUserId) {
+            user.log(`Отправка pong к ${toUserId}`, 'warning');
+            user.state = 'connected';
+            user.targetUser = toUserId;
+            
+            user.ws.send(JSON.stringify({
+                type: 'pong',
+                to: toUserId,
+                data: { received: true }
+            }));
+            
+            updateButtons(user);
+        }
+        
+        function sendOffer1() {
+            if (!user1.ws || user1.state !== 'connected') {
+                user1.log('Невозможно отправить offer', 'warning');
+                return;
+            }
+            
+            user1.log(`Отправка тестового offer к user2`, 'warning');
+            
+            const testOffer = {
+                type: 'offer',
+                sdp: 'v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:test\r\na=ice-pwd:test\r\na=fingerprint:sha-256 test\r\na=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n'
+            };
+            
+            user1.ws.send(JSON.stringify({
+                type: 'offer',
+                to: 'user2',
+                data: testOffer
+            }));
+        }
+        
+        function sendAnswer(user, toUserId) {
+            user.log(`Автоматическая отправка answer к ${toUserId}`, 'warning');
+            
+            const testAnswer = {
+                type: 'answer',
+                sdp: 'v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:test\r\na=ice-pwd:test\r\na=fingerprint:sha-256 test\r\na=setup:active\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n'
+            };
+            
+            user.ws.send(JSON.stringify({
+                type: 'answer',
+                to: toUserId,
+                data: testAnswer
+            }));
+        }
+        
+        function disconnectUser1() {
+            if (!user1.ws || user1.state !== 'connected') {
+                user1.log('Нет активного соединения для разрыва', 'warning');
+                return;
+            }
+            
+            user1.log(`Разрыв соединения с ${user1.targetUser}`, 'warning');
+            
+            user1.ws.send(JSON.stringify({
+                type: 'disconnect',
+                to: user1.targetUser,
+                data: { reason: 'user_disconnect' }
+            }));
+            
+            user1.state = 'idle';
+            user1.targetUser = null;
+            user1.log(`Соединение разорвано, возврат в исходное состояние`, 'success');
+            updateButtons(user1);
+        }
+        
+        function updateButtons(user) {
+            if (user === user1) {
+                const offerBtn = document.getElementById('offerBtn1');
+                const disconnectBtn = document.getElementById('disconnectBtn1');
+                
+                if (user.state === 'connected') {
+                    offerBtn.style.display = 'inline-block';
+                    offerBtn.disabled = false;
+                    disconnectBtn.style.display = 'inline-block';
+                    disconnectBtn.disabled = false;
+                } else {
+                    offerBtn.style.display = 'none';
+                    disconnectBtn.style.display = 'none';
+                }
+            } else if (user === user2) {
+                const autoAnswerInfo = document.getElementById('autoAnswerInfo');
+                if (user.state === 'connected') {
+                    autoAnswerInfo.style.display = 'block';
+                } else {
+                    autoAnswerInfo.style.display = 'none';
+                }
+            }
+        }
+        
+        function getStats() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    const statsEl = document.getElementById('stats');
+                    statsEl.innerHTML = `<div class="info">Подключенных пользователей: ${data.connectedUsers}</div>`;
+                    data.users.forEach(user => {
+                        statsEl.innerHTML += `<div class="info">- ${user.id}: ${user.state} (${user.targetUser || 'нет цели'})</div>`;
+                    });
+                })
+                .catch(error => {
+                    document.getElementById('stats').innerHTML = `<div class="error">Ошибка получения статистики: ${error.message}</div>`;
+                });
+        }
+    </script>
+</body>
+</html>

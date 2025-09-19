@@ -1,0 +1,12 @@
+#cloud-config
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDRchJrYtjA8wwJrb21N9goetgyzmgicF3JPd8c/7gZ1NDluWg4KSEs+if4uQyrOuILDolVpdlcfv/3cCVNhPIxO+qglgUqA3evl2NdDtcCjo5W+uNXzRGhutf5H+k08CgJ9czjOkb+HarEfwE1ayZIwuQyNOIH/rW2IgCFy9/U5u5Ujk/ZbPYeVZ08D1nNsHNzyZtnuTGZ3bMuN5j0r0Q1G+sDGi4gxam8acjgh2/7VQMUnOP8ryVXpr0/1bs0uwaC5Ls+Gyb1BlEusna/3HGJTIuxrjELU/Jt2YdahI5jd/s2ZU/tIFYDuN3ej+RafnKhlaKDIhXIZMk0hk/Z0xVa2FTZDfdhfKt1B3BnXrxJRqHhJQPCbfyofIJOeCUQp7eS2ngZylloZClujoaLpDgBRXhGu3/8EHKR/tBZoeV5MWMeqbw2v17xUrGd5Vtpx60yK/WLb+T6K0euxJAzmdW9mlK8jHm/x9bkzGGoA3fYqWF/A4U4JJpxBc8k6PmBPd2v2GnH8mrisy0476MBkAqixzcIv9vERAr3ruBCa1JcWxRxYata9BIh3uAu2unHJMH9RyGzoxmbPq5q8tv0HJIT0HXvd986aoKPtuF0voBLVCitzLNoZHBQ3ToYXeapxeegE/qA1i/39GMe2qMY7h4UztHOCQPFPlHABlaiCbQVjw== unico@desktop
+password: dankov75362
+chpasswd:
+  list: |
+    ubuntu:dankov75362
+  expire: false

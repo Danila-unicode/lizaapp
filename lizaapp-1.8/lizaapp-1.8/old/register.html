@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация - WebRTC Контакты</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .auth-container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .auth-header {
+            margin-bottom: 30px;
+        }
+
+        .auth-header h1 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .auth-header p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: bold;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px 0;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .status.success {
+            background: linear-gradient(45deg, #56ab2f, #a8e6cf);
+            color: white;
+        }
+
+        .status.error {
+            background: linear-gradient(45deg, #ff416c, #ff4b2b);
+            color: white;
+        }
+
+        .status.info {
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+            color: white;
+        }
+
+        .links {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .links a {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 10px;
+            font-weight: bold;
+        }
+
+        .links a:hover {
+            text-decoration: underline;
+        }
+
+        .log {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            text-align: left;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+        }
+
+        .log-entry.info {
+            color: #3498db;
+        }
+
+        .log-entry.success {
+            color: #2ecc71;
+        }
+
+        .log-entry.error {
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>📝 Регистрация</h1>
+            <p>Создайте аккаунт для WebRTC Контакты</p>
+        </div>
+
+        <div id="statusMessage" class="status" style="display: none;"></div>
+
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="phone">Номер телефона:</label>
+                <input type="tel" id="phone" placeholder="+7(XXX)XXX-XX-XX" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Пароль:</label>
+                <input type="password" id="password" placeholder="Минимум 6 символов" required>
+            </div>
+
+            <div class="form-group">
+                <label for="confirmPassword">Подтвердите пароль:</label>
+                <input type="password" id="confirmPassword" placeholder="Повторите пароль" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="registerBtn">Зарегистрироваться</button>
+        </form>
+
+        <div class="links">
+            <a href="auth.html">Войти</a>
+            <a href="contacts-app.html">Приложение</a>
+        </div>
+
+        <div class="log" id="log">
+            <div class="log-entry info">[Система] Страница регистрации готова</div>
+        </div>
+    </div>
+
+    <script>
+        // Логирование
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${time}] ${message}`;
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        // Показать статус
+        function showStatus(message, type = 'info') {
+            const statusElement = document.getElementById('statusMessage');
+            statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
+            statusElement.style.display = 'block';
+            
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusElement.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // Обработка формы регистрации
+        document.getElementById('registerForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const phone = document.getElementById('phone').value;
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            const registerBtn = document.getElementById('registerBtn');
+            
+            if (!phone || !password || !confirmPassword) {
+                showStatus('Заполните все поля', 'error');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showStatus('Пароли не совпадают', 'error');
+                return;
+            }
+
+            if (password.length < 6) {
+                showStatus('Пароль должен содержать минимум 6 символов', 'error');
+                return;
+            }
+
+            registerBtn.disabled = true;
+            registerBtn.textContent = 'Регистрация...';
+            
+            try {
+                log(`Попытка регистрации: ${phone}`, 'info');
+                
+                const response = await fetch('api/register.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        phone: phone,
+                        password: password
+                    })
+                });
+                
+                const data = await response.json();
+                log(`Результат регистрации: ${JSON.stringify(data)}`, 'info');
+                
+                if (data.success) {
+                    showStatus('Регистрация успешна! Теперь войдите в систему.', 'success');
+                    log('Регистрация успешна', 'success');
+                    
+                    // Очищаем форму
+                    document.getElementById('phone').value = '';
+                    document.getElementById('password').value = '';
+                    document.getElementById('confirmPassword').value = '';
+                    
+                    // Перенаправляем на страницу входа через 2 секунды
+                    setTimeout(() => {
+                        window.location.href = 'auth.html';
+                    }, 2000);
+                } else {
+                    showStatus(data.message || 'Ошибка регистрации', 'error');
+                    log(`Ошибка регистрации: ${data.message}`, 'error');
+                }
+                
+            } catch (error) {
+                showStatus('Ошибка соединения', 'error');
+                log(`Ошибка: ${error.message}`, 'error');
+            } finally {
+                registerBtn.disabled = false;
+                registerBtn.textContent = 'Зарегистрироваться';
+            }
+        });
+
+        log('Страница регистрации загружена', 'success');
+    </script>
+</body>
+</html>
