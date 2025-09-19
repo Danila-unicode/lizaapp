@@ -188,6 +188,9 @@ function handleMessage(userId, message) {
         case 'disconnect':
             handleDisconnectSignal(userId, message);
             break;
+        case 'call_rejected':
+            handleCallRejected(userId, message);
+            break;
         default:
             log(`Неизвестный тип сообщения: ${message.type}`, 'warning');
             user.ws.send(JSON.stringify({
@@ -315,6 +318,26 @@ function handleDisconnectSignal(userId, message) {
     // Пересылаем disconnect целевому пользователю
     forwardMessage(message.to, {
         type: 'disconnect',
+        from: userId,
+        to: message.to,
+        data: message.data
+    });
+    
+    // Сбрасываем состояние пользователя
+    user.state = 'idle';
+    user.targetUser = null;
+}
+
+// Обработка сигнала call_rejected
+function handleCallRejected(userId, message) {
+    const user = connectedUsers.get(userId);
+    if (!user) return;
+    
+    log(`Сигнал call_rejected от ${userId} к ${message.to}`, 'warning');
+    
+    // Пересылаем call_rejected целевому пользователю
+    forwardMessage(message.to, {
+        type: 'call_rejected',
         from: userId,
         to: message.to,
         data: message.data

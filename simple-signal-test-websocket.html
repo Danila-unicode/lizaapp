@@ -34,7 +34,8 @@
         .btn-small { padding: 5px 10px; font-size: 12px; }
         .btn-success { background: #4CAF50; color: white; }
         .btn-danger { background: #f44336; color: white; }
-        .btn-primary { background: #2196F3; color: white; }
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-secondary { background: #2196F3; color: white; }
         .btn-warning { background: #ff9800; color: white; }
         
         /* Скрытие старых элементов */
@@ -292,7 +293,7 @@
             try {
                 currentUser.ws.send(JSON.stringify(message));
                 currentUser.log(`✅ ${type} отправлен`, 'success');
-                } catch (error) {
+            } catch (error) {
                 currentUser.log(`❌ Ошибка отправки ${type}: ${error.message}`, 'error');
             }
         }
@@ -353,7 +354,7 @@
                     }));
                     
                     currentUser.log(`✅ Авторизация успешна`, 'success');
-                        } else {
+                } else {
                     currentUser.log(`❌ Ошибка авторизации: ${data.error}`, 'error');
                     return;
                 }
@@ -376,9 +377,9 @@
                 await connectWebSocket();
             } catch (error) {
                 currentUser.log(`❌ Ошибка подключения к WebSocket: ${error.message}`, 'error');
-                        return;
-                    }
-                    
+                return;
+            }
+            
             // Обновляем UI
             updateUI();
             
@@ -439,6 +440,31 @@
         }
         
         // Функция для начала звонка
+        async function startAudioCall() {
+            const targetId = document.getElementById('targetUserId').value;
+            
+            if (!targetId) {
+                currentUser.log('❌ Не указан целевой пользователь', 'error');
+                return;
+            }
+            
+            if (currentUser.state !== 'idle') {
+                currentUser.log(`❌ Нельзя начать вызов - состояние: ${currentUser.state}`, 'error');
+                return;
+            }
+            
+            currentUser.log(`🎵 Начинаем аудио звонок к ${targetId}`, 'info');
+            currentUser.state = 'connecting';
+            currentUser.targetUser = targetId;
+            currentUser.isInitiator = true;
+            currentUser.webrtcInitiated = false;
+            updateUI();
+            
+            // Отправляем ping через WebSocket с типом аудио
+            currentUser.log(`📤 Отправляем ping к ${targetId}`, 'info');
+            sendWebSocketMessage('ping', { timestamp: Date.now(), callType: 'audio' }, targetId);
+        }
+        
         async function startCall() {
             const targetId = document.getElementById('targetUserId').value;
             
@@ -461,7 +487,7 @@
             
             // Отправляем ping через WebSocket
             currentUser.log(`📤 Отправляем ping к ${targetId}`, 'info');
-            sendWebSocketMessage('ping', { timestamp: Date.now() }, targetId);
+            sendWebSocketMessage('ping', { timestamp: Date.now(), callType: 'video' }, targetId);
         }
         
         
@@ -485,13 +511,25 @@
             
             currentUser.log(`📞 Входящий звонок от ${signal.from}`, 'info');
             
-            // Запускаем медиа потоки сразу при получении ping
+            // Определяем тип звонка
+            const callType = signal.data.callType || 'video';
+            const isAudioCall = callType === 'audio';
+            
+            // Запускаем медиа потоки в зависимости от типа звонка
             try {
-                currentUser.log(`📹 Запуск камеры и микрофона для входящего звонка...`, 'info');
-                currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
+                if (isAudioCall) {
+                    currentUser.log(`🎵 Запуск микрофона для аудио звонка...`, 'info');
+                    currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: false,  // Только аудио!
+                        audio: true 
+                    });
+                } else {
+                    currentUser.log(`📹 Запуск камеры и микрофона для видео звонка...`, 'info');
+                    currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: true, 
+                        audio: true 
+                    });
+                }
                 
                 document.getElementById('localVideo').srcObject = currentUser.localStream;
                 currentUser.log(`✅ Медиа потоки получены: ${currentUser.localStream.getTracks().length} треков`, 'success');
@@ -551,7 +589,7 @@
                 
                 // Обработчики событий
                 currentUser.peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
+                    if (event.candidate) {
                         sendSignal('ice-candidate', event.candidate);
                     }
                 };
@@ -590,7 +628,7 @@
                 currentUser.log(`⚠️ Игнорируем offer - состояние: ${currentUser.state}, target: ${currentUser.targetUser}`, 'warning');
                 return;
             }
-
+            
             currentUser.log(`📥 Получен offer от ${signal.from}`, 'info');
             
             // Проверяем наличие медиа потоков
@@ -749,10 +787,10 @@
                 try {
                     await currentUser.peerConnection.addIceCandidate(signal.data);
                     currentUser.log(`🧊 ICE кандидат добавлен от ${signal.from}`, 'info');
-                } catch (error) {
+                                } catch (error) {
                     currentUser.log(`❌ Ошибка добавления ICE кандидата: ${error.message}`, 'error');
                 }
-            } else {
+                            } else {
                 currentUser.log(`⚠️ PeerConnection не создан, игнорируем ICE кандидат`, 'warning');
             }
         }
@@ -767,7 +805,7 @@
                 // Если это отклонение звонка на ранней стадии
                 if (signal.data && signal.data.reason === 'call_rejected') {
                     currentUser.log(`❌ Звонок отклонен пользователем ${signal.from}`, 'warning');
-                } else {
+                            } else {
                     currentUser.log(`🔌 Соединение разорвано`, 'warning');
                 }
                 
@@ -1138,6 +1176,7 @@
                     <div class="username">👤 ${friend.username}</div>
                     <div class="actions">
                         <button onclick="callFriend('${friend.username}')" class="btn-primary btn-small" id="callBtn_${friend.username}">📞 Видеозвонок</button>
+                        <button onclick="callFriendAudio('${friend.username}')" class="btn-secondary btn-small" id="audioCallBtn_${friend.username}">🎵 Аудиозвонок</button>
                         <button onclick="endCall()" class="btn-danger btn-small" id="disconnectBtn_${friend.username}" style="display: none;">🔌 Завершить</button>
                     </div>
                 </div>
@@ -1272,6 +1311,46 @@
             }
         }
         
+        // Аудио звонок другу
+        async function callFriendAudio(username) {
+            currentUser.log(`🎵 Аудио звонок другу: ${username}`, 'info');
+            
+            // Скрываем кнопки "Аудиозвонок" и показываем "Завершить"
+            const audioCallBtn = document.getElementById(`audioCallBtn_${username}`);
+            const disconnectBtn = document.getElementById(`disconnectBtn_${username}`);
+            
+            if (audioCallBtn) audioCallBtn.style.display = 'none';
+            if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
+            
+            // Запускаем только аудио потоки у инициатора
+            try {
+                currentUser.log(`🎵 Запуск микрофона...`, 'info');
+                currentUser.localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: false,  // Только аудио!
+                    audio: true 
+                });
+                
+                document.getElementById('localVideo').srcObject = currentUser.localStream;
+                currentUser.log(`✅ Аудио поток получен: ${currentUser.localStream.getTracks().length} треков (инициатор)`, 'success');
+                
+                // Логируем детали треков
+                currentUser.localStream.getTracks().forEach(track => {
+                    currentUser.log(`🎵 Трек: ${track.kind}, enabled: ${track.enabled}, readyState: ${track.readyState} (инициатор)`, 'info');
+                });
+                
+                // Используем существующий функционал звонков, но с аудио типом
+                document.getElementById('targetUserId').value = username;
+                startAudioCall();
+                
+            } catch (error) {
+                currentUser.log(`❌ Ошибка получения аудио: ${error.message}`, 'error');
+                
+                // Восстанавливаем кнопки при ошибке
+                if (audioCallBtn) audioCallBtn.style.display = 'inline-block';
+                if (disconnectBtn) disconnectBtn.style.display = 'none';
+            }
+        }
+        
         // Звонок другу
         async function callFriend(username) {
             currentUser.log(`📞 Звонок другу: ${username}`, 'info');
@@ -1303,7 +1382,7 @@
                 document.getElementById('targetUserId').value = username;
                 startCall();
                 
-                } catch (error) {
+            } catch (error) {
                 currentUser.log(`❌ Ошибка получения медиа: ${error.message}`, 'error');
                 
                 // Восстанавливаем кнопки при ошибке
@@ -1317,9 +1396,11 @@
             // Восстанавливаем все кнопки друзей
             friendsData.friends.forEach(friend => {
                 const callBtn = document.getElementById(`callBtn_${friend.username}`);
+                const audioCallBtn = document.getElementById(`audioCallBtn_${friend.username}`);
                 const disconnectBtn = document.getElementById(`disconnectBtn_${friend.username}`);
                 
                 if (callBtn) callBtn.style.display = 'inline-block';
+                if (audioCallBtn) audioCallBtn.style.display = 'inline-block';
                 if (disconnectBtn) disconnectBtn.style.display = 'none';
             });
         }
@@ -1366,7 +1447,7 @@
             // Подключаемся к WebSocket серверу
             try {
                 await connectWebSocket();
-            } catch (error) {
+                } catch (error) {
                 currentUser.log(`❌ Ошибка подключения к WebSocket: ${error.message}`, 'error');
                 return;
             }
